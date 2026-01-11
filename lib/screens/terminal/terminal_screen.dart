@@ -2,13 +2,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../providers/connection_provider.dart';
 import '../../providers/ssh_provider.dart';
 import '../../providers/tmux_provider.dart';
+import '../../services/keychain/secure_storage.dart';
 import '../../services/ssh/ssh_client.dart';
 import '../../services/tmux/tmux_commands.dart';
 import '../../services/tmux/tmux_parser.dart';
@@ -33,7 +33,7 @@ class TerminalScreen extends ConsumerStatefulWidget {
 class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   late Terminal _terminal;
   final _terminalController = TerminalController();
-  final _secureStorage = const FlutterSecureStorage();
+  final _secureStorage = SecureStorageService();
 
   // 接続状態
   bool _isConnecting = false;
@@ -132,17 +132,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   /// 認証オプションを取得
   Future<SshConnectOptions> _getAuthOptions(Connection connection) async {
     if (connection.authMethod == 'key' && connection.keyId != null) {
-      final privateKey = await _secureStorage.read(
-        key: 'ssh_key_${connection.keyId}_private',
-      );
-      final passphrase = await _secureStorage.read(
-        key: 'ssh_key_${connection.keyId}_passphrase',
-      );
+      final privateKey = await _secureStorage.getPrivateKey(connection.keyId!);
+      final passphrase = await _secureStorage.getPassphrase(connection.keyId!);
       return SshConnectOptions(privateKey: privateKey, passphrase: passphrase);
     } else {
-      final password = await _secureStorage.read(
-        key: 'connection_${connection.id}_password',
-      );
+      final password = await _secureStorage.getPassword(connection.id);
       return SshConnectOptions(password: password);
     }
   }
