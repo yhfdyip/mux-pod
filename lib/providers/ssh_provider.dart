@@ -9,22 +9,34 @@ class SshState {
   final SshConnectionState connectionState;
   final String? error;
   final String? sessionTitle;
+  final bool isReconnecting;
+  final int reconnectAttempt;
+  final int? reconnectDelayMs;
 
   const SshState({
     this.connectionState = SshConnectionState.disconnected,
     this.error,
     this.sessionTitle,
+    this.isReconnecting = false,
+    this.reconnectAttempt = 0,
+    this.reconnectDelayMs,
   });
 
   SshState copyWith({
     SshConnectionState? connectionState,
     String? error,
     String? sessionTitle,
+    bool? isReconnecting,
+    int? reconnectAttempt,
+    int? reconnectDelayMs,
   }) {
     return SshState(
       connectionState: connectionState ?? this.connectionState,
       error: error,
       sessionTitle: sessionTitle ?? this.sessionTitle,
+      isReconnecting: isReconnecting ?? this.isReconnecting,
+      reconnectAttempt: reconnectAttempt ?? this.reconnectAttempt,
+      reconnectDelayMs: reconnectDelayMs,
     );
   }
 
@@ -39,6 +51,12 @@ class SshNotifier extends Notifier<SshState> {
   SshClient? _client;
   final SshForegroundTaskService _foregroundService = SshForegroundTaskService();
 
+  // 再接続用のキャッシュ
+  Connection? _lastConnection;
+  SshConnectOptions? _lastOptions;
+  static const int _maxReconnectAttempts = 5;
+  static const List<int> _reconnectDelays = [1000, 2000, 4000, 8000, 16000]; // 指数バックオフ
+
   @override
   SshState build() {
     // クリーンアップを登録
@@ -51,6 +69,12 @@ class SshNotifier extends Notifier<SshState> {
 
   /// SSHクライアントを取得
   SshClient? get client => _client;
+
+  /// 最後の接続情報
+  Connection? get lastConnection => _lastConnection;
+
+  /// 最後の接続オプション
+  SshConnectOptions? get lastOptions => _lastOptions;
 
   /// SSH接続を確立（シェル付き - 従来方式）
   Future<void> connect(Connection connection, SshConnectOptions options) async {
@@ -111,9 +135,15 @@ class SshNotifier extends Notifier<SshState> {
   ///
   /// exec()のみ使用するため、シェルは起動しない。
   Future<void> connectWithoutShell(Connection connection, SshConnectOptions options) async {
+    // 再接続用にキャッシュ
+    _lastConnection = connection;
+    _lastOptions = options;
+
     state = state.copyWith(
       connectionState: SshConnectionState.connecting,
       error: null,
+      isReconnecting: false,
+      reconnectAttempt: 0,
     );
 
     try {
@@ -130,6 +160,8 @@ class SshNotifier extends Notifier<SshState> {
 
       state = state.copyWith(
         connectionState: SshConnectionState.connected,
+        isReconnecting: false,
+        reconnectAttempt: 0,
       );
 
       // 最終接続日時を更新
@@ -162,6 +194,77 @@ class SshNotifier extends Notifier<SshState> {
       _client?.dispose();
       _client = null;
     }
+  }
+
+  /// 再接続を試みる
+  ///
+  /// 自動再接続用。指数バックオフで最大5回まで試行する。
+  Future<bool> reconnect() async {
+    if (_lastConnection == null || _lastOptions == null) {
+      return false;
+    }
+
+    final attempt = state.reconnectAttempt;
+    if (attempt >= _maxReconnectAttempts) {
+      state = state.copyWith(
+        isReconnecting: false,
+        error: 'Max reconnect attempts reached',
+      );
+      return false;
+    }
+
+    final delayMs = _reconnectDelays[attempt.clamp(0, _reconnectDelays.length - 1)];
+    state = state.copyWith(
+      isReconnecting: true,
+      reconnectAttempt: attempt + 1,
+      reconnectDelayMs: delayMs,
+    );
+
+    // 遅延後に再接続
+    await Future.delayed(Duration(milliseconds: delayMs));
+
+    try {
+      // 古いクライアントをクリーンアップ
+      _client?.dispose();
+      _client = SshClient();
+
+      await _client!.connect(
+        host: _lastConnection!.host,
+        port: _lastConnection!.port,
+        username: _lastConnection!.username,
+        options: _lastOptions!,
+      );
+
+      state = state.copyWith(
+        connectionState: SshConnectionState.connected,
+        isReconnecting: false,
+        reconnectAttempt: 0,
+        error: null,
+      );
+
+      return true;
+    } catch (e) {
+      // 再接続失敗、次の試行を待つ
+      state = state.copyWith(
+        connectionState: SshConnectionState.error,
+        error: 'Reconnect failed: $e',
+      );
+      return false;
+    }
+  }
+
+  /// 接続がアクティブかチェック
+  bool checkConnection() {
+    return _client != null && _client!.isConnected;
+  }
+
+  /// 再接続状態をリセット
+  void resetReconnect() {
+    state = state.copyWith(
+      isReconnecting: false,
+      reconnectAttempt: 0,
+      reconnectDelayMs: null,
+    );
   }
 
   /// 切断
