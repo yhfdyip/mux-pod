@@ -168,7 +168,10 @@ class _TerminalTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeSessionsState = ref.watch(activeSessionsProvider);
-    final sessions = activeSessionsState.sessions;
+    // 接続中（isAttached == true）のセッションのみ表示
+    final sessions = activeSessionsState.sessions
+        .where((s) => s.isAttached)
+        .toList();
 
     return Scaffold(
       body: CustomScrollView(
@@ -212,30 +215,14 @@ class _TerminalTab extends ConsumerWidget {
       surfaceTintColor: Colors.transparent,
       flexibleSpace: FlexibleSpaceBar(
         titlePadding: const EdgeInsets.only(left: 24, bottom: 16),
-        title: Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Active Sessions',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'TERMINAL_MODE: READY',
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 10,
-                fontWeight: FontWeight.w400,
-                color: DesignColors.textMuted,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+        title: Text(
+          'Active Sessions',
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+            letterSpacing: -0.5,
+          ),
         ),
       ),
       actions: [
