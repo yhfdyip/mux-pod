@@ -49,8 +49,27 @@ class DesignColors {
   static const terminalCyan = Color(0xFF06B6D4);
   static const terminalMagenta = Color(0xFFA855F7);
 
-  // Special Keys Bar Colors
+  // Special Keys Bar Colors (Dark)
   static const keyBackground = Color(0xFF2A2B35);
   static const keyBackgroundHover = Color(0xFF353640);
   static const footerBackground = Color(0xFF14151A);
+
+  // Special Keys Bar Colors (Light)
+  static const keyBackgroundLight = Color(0xFFE5E7EB);
+  static const keyBackgroundHoverLight = Color(0xFFD1D5DB);
+  static const footerBackgroundLight = Color(0xFFF3F4F6);
+
+  // Status Card Colors (Dark)
+  static const connectedCardDark = Color(0xFF14532D);
+  static const connectedCardBorderDark = Color(0xFF166534);
+  static const connectedCardTextDark = Color(0xFF4ADE80);
+  static const connectingCardDark = Color(0xFF153E42);
+  static const connectingCardBorderDark = Color(0xFF1F5F66);
+
+  // Status Card Colors (Light)
+  static const connectedCardLight = Color(0xFFDCFCE7);
+  static const connectedCardBorderLight = Color(0xFF86EFAC);
+  static const connectedCardTextLight = Color(0xFF166534);
+  static const connectingCardLight = Color(0xFFE0F7FA);
+  static const connectingCardBorderLight = Color(0xFF80DEEA);
 }

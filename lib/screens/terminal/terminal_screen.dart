@@ -379,10 +379,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     // ローカル状態を使用（ref.watchは使わない）
     final sshState = _sshState;
     final tmuxState = ref.read(tmuxProvider);
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: DesignColors.backgroundDark,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           Column(
@@ -395,8 +397,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       text: _terminalContent,
                       paneWidth: _paneWidth,
                       paneHeight: _paneHeight,
-                      backgroundColor: DesignColors.backgroundDark,
-                      foregroundColor: Colors.white.withValues(alpha: 0.9),
+                      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                      foregroundColor: colorScheme.onSurface.withValues(alpha: 0.9),
                       onKeyInput: _handleKeyInput,
                     ),
                     // Pane indicator (右上)
@@ -418,7 +420,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
           // ローディングオーバーレイ
           if (_isConnecting || sshState.isConnecting)
             Container(
-              color: Colors.black54,
+              color: isDark ? Colors.black54 : Colors.white70,
               child: const Center(
                 child: CircularProgressIndicator(),
               ),
@@ -522,17 +524,19 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// エラーオーバーレイ
   Widget _buildErrorOverlay(String? error) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      color: Colors.black87,
+      color: isDark ? Colors.black87 : Colors.white.withValues(alpha: 0.95),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+            Icon(Icons.error_outline, color: colorScheme.error, size: 48),
             const SizedBox(height: 16),
             Text(
               error ?? 'Connection error',
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: colorScheme.onSurface),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -552,6 +556,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     final activeWindow = tmuxState.activeWindow;
     final currentWindow = activeWindow?.name ?? '';
     final activePane = tmuxState.activePane;
+    final colorScheme = Theme.of(context).colorScheme;
 
     // SafeAreaを外側に配置してステータスバー分のスペースを確保
     return SafeArea(
@@ -559,9 +564,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       child: Container(
         height: 40,
         decoration: BoxDecoration(
-          color: DesignColors.surfaceDark.withValues(alpha: 0.9),
-          border: const Border(
-            bottom: BorderSide(color: Color(0xFF2A2B36), width: 1),
+          color: colorScheme.surface.withValues(alpha: 0.9),
+          border: Border(
+            bottom: BorderSide(color: colorScheme.outline, width: 1),
           ),
         ),
         child: Row(
@@ -610,7 +615,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               icon: Icon(
                 Icons.settings,
                 size: 16,
-                color: Colors.white.withValues(alpha: 0.6),
+                color: colorScheme.onSurface.withValues(alpha: 0.6),
               ),
               padding: const EdgeInsets.all(8),
               constraints: const BoxConstraints(),
@@ -626,13 +631,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   void _showSessionSelector(TmuxState tmuxState) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: DesignColors.surfaceDark,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        final maxHeight = MediaQuery.of(context).size.height * 0.6;
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final maxHeight = MediaQuery.of(sheetContext).size.height * 0.6;
         return SafeArea(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
@@ -643,20 +648,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(Icons.folder, color: DesignColors.primary),
+                      Icon(Icons.folder, color: colorScheme.primary),
                       const SizedBox(width: 8),
                       Text(
                         'Select Session',
                         style: GoogleFonts.spaceGrotesk(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                          color: colorScheme.onSurface,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Divider(height: 1, color: colorScheme.outline),
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
@@ -667,21 +672,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       return ListTile(
                         leading: Icon(
                           Icons.folder,
-                          color: isActive ? DesignColors.primary : Colors.white60,
+                          color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                         title: Text(
                           session.name,
                           style: TextStyle(
-                            color: isActive ? DesignColors.primary : Colors.white,
+                            color: isActive ? colorScheme.primary : colorScheme.onSurface,
                             fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
                         subtitle: Text(
                           '${session.windowCount} windows',
-                          style: const TextStyle(color: Colors.white38),
+                          style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.38)),
                         ),
                         trailing: isActive
-                            ? Icon(Icons.check, color: DesignColors.primary)
+                            ? Icon(Icons.check, color: colorScheme.primary)
                             : null,
                         onTap: () {
                           Navigator.pop(context);
@@ -707,13 +712,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: DesignColors.surfaceDark,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        final maxHeight = MediaQuery.of(context).size.height * 0.6;
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final maxHeight = MediaQuery.of(sheetContext).size.height * 0.6;
         return SafeArea(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
@@ -724,20 +729,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(Icons.tab, color: DesignColors.primary),
+                      Icon(Icons.tab, color: colorScheme.primary),
                       const SizedBox(width: 8),
                       Text(
                         'Select Window',
                         style: GoogleFonts.spaceGrotesk(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                          color: colorScheme.onSurface,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Divider(height: 1, color: colorScheme.outline),
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
@@ -748,21 +753,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       return ListTile(
                         leading: Icon(
                           Icons.tab,
-                          color: isActive ? DesignColors.primary : Colors.white60,
+                          color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                         title: Text(
                           '${window.index}: ${window.name}',
                           style: TextStyle(
-                            color: isActive ? DesignColors.primary : Colors.white,
+                            color: isActive ? colorScheme.primary : colorScheme.onSurface,
                             fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
                         subtitle: Text(
                           '${window.paneCount} panes',
-                          style: const TextStyle(color: Colors.white38),
+                          style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.38)),
                         ),
                         trailing: isActive
-                            ? Icon(Icons.check, color: DesignColors.primary)
+                            ? Icon(Icons.check, color: colorScheme.primary)
                             : null,
                         onTap: () {
                           Navigator.pop(context);
@@ -788,13 +793,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: DesignColors.surfaceDark,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        final maxHeight = MediaQuery.of(context).size.height * 0.6;
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final maxHeight = MediaQuery.of(sheetContext).size.height * 0.6;
         return SafeArea(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
@@ -805,20 +810,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(Icons.terminal, color: DesignColors.primary),
+                      Icon(Icons.terminal, color: colorScheme.primary),
                       const SizedBox(width: 8),
                       Text(
                         'Select Pane',
                         style: GoogleFonts.spaceGrotesk(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                          color: colorScheme.onSurface,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Divider(height: 1, color: colorScheme.outline),
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
@@ -835,21 +840,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       return ListTile(
                         leading: Icon(
                           Icons.terminal,
-                          color: isActive ? DesignColors.primary : Colors.white60,
+                          color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                         title: Text(
                           paneTitle,
                           style: TextStyle(
-                            color: isActive ? DesignColors.primary : Colors.white,
+                            color: isActive ? colorScheme.primary : colorScheme.onSurface,
                             fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
                         subtitle: Text(
                           '${pane.width}x${pane.height}',
-                          style: const TextStyle(color: Colors.white38),
+                          style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.38)),
                         ),
                         trailing: isActive
-                            ? Icon(Icons.check, color: DesignColors.primary)
+                            ? Icon(Icons.check, color: colorScheme.primary)
                             : null,
                         onTap: () {
                           Navigator.pop(context);
@@ -875,15 +880,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     bool isSelected = false,
     VoidCallback? onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: isSelected
             ? BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
+                color: colorScheme.onSurface.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                border: Border.all(color: colorScheme.onSurface.withValues(alpha: 0.05)),
               )
             : null,
         child: Row(
@@ -894,8 +900,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                 icon,
                 size: 12,
                 color: isActive
-                    ? DesignColors.primary
-                    : (isSelected ? Colors.white : Colors.white60),
+                    ? colorScheme.primary
+                    : (isSelected ? colorScheme.onSurface : colorScheme.onSurface.withValues(alpha: 0.6)),
               ),
               const SizedBox(width: 4),
             ],
@@ -905,8 +911,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                 fontSize: 11,
                 fontWeight: isActive || isSelected ? FontWeight.w700 : FontWeight.w400,
                 color: isActive
-                    ? DesignColors.primary
-                    : (isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5)),
+                    ? colorScheme.primary
+                    : (isSelected ? colorScheme.onSurface : colorScheme.onSurface.withValues(alpha: 0.5)),
               ),
             ),
             if (onTap != null) ...[
@@ -915,8 +921,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                 Icons.arrow_drop_down,
                 size: 14,
                 color: isActive
-                    ? DesignColors.primary.withValues(alpha: 0.7)
-                    : Colors.white38,
+                    ? colorScheme.primary.withValues(alpha: 0.7)
+                    : colorScheme.onSurface.withValues(alpha: 0.38),
               ),
             ],
           ],
@@ -926,6 +932,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   Widget _buildBreadcrumbSeparator() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
@@ -933,7 +940,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         style: GoogleFonts.jetBrainsMono(
           fontSize: 10,
           fontWeight: FontWeight.w300,
-          color: Colors.white.withValues(alpha: 0.2),
+          color: colorScheme.onSurface.withValues(alpha: 0.2),
         ),
       ),
     );
@@ -941,11 +948,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// 接続状態インジケーター（レイテンシまたは再接続状態を表示）
   Widget _buildConnectionIndicator() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: Color(0xFF2A2B36), width: 1),
+          left: BorderSide(color: colorScheme.outline, width: 1),
         ),
       ),
       child: _sshState.isReconnecting
@@ -1063,15 +1071,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   void _showInputDialog() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: DesignColors.surfaceDark,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _InputDialogContent(
+      builder: (sheetContext) => _InputDialogContent(
         onSend: (value) async {
           await _sendMultilineText(value);
-          if (context.mounted) Navigator.pop(context);
+          if (sheetContext.mounted) Navigator.pop(sheetContext);
         },
       ),
     );
@@ -1103,6 +1110,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     final window = tmuxState.activeWindow;
     final panes = window?.panes ?? [];
     final activePaneId = tmuxState.activePaneId;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
 
     if (panes.isEmpty) {
       return const SizedBox.shrink();
@@ -1120,7 +1129,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
           height: indicatorSize,
           padding: const EdgeInsets.all(2),
           decoration: BoxDecoration(
-            color: Colors.black26,
+            color: isDark ? Colors.black26 : Colors.black12,
             borderRadius: BorderRadius.circular(4),
           ),
           child: CustomPaint(
@@ -1128,7 +1137,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
             painter: _PaneLayoutPainter(
               panes: panes,
               activePaneId: activePaneId,
-              activeColor: DesignColors.primary,
+              activeColor: colorScheme.primary,
+              isDark: isDark,
             ),
           ),
         ),
@@ -1145,11 +1155,13 @@ class _PaneLayoutPainter extends CustomPainter {
   final List<TmuxPane> panes;
   final String? activePaneId;
   final Color activeColor;
+  final bool isDark;
 
   _PaneLayoutPainter({
     required this.panes,
     this.activePaneId,
     required this.activeColor,
+    required this.isDark,
   });
 
   @override
@@ -1189,12 +1201,12 @@ class _PaneLayoutPainter extends CustomPainter {
       final bgPaint = Paint()
         ..color = isActive
             ? activeColor.withValues(alpha: 0.3)
-            : Colors.black45;
+            : (isDark ? Colors.black45 : Colors.grey.shade300);
       canvas.drawRect(rect, bgPaint);
 
       // 枠線
       final borderPaint = Paint()
-        ..color = isActive ? activeColor : Colors.white30
+        ..color = isActive ? activeColor : (isDark ? Colors.white30 : Colors.grey.shade500)
         ..style = PaintingStyle.stroke
         ..strokeWidth = isActive ? 1.5 : 1.0;
       canvas.drawRect(rect, borderPaint);
@@ -1205,7 +1217,8 @@ class _PaneLayoutPainter extends CustomPainter {
   bool shouldRepaint(covariant _PaneLayoutPainter oldDelegate) {
     return panes != oldDelegate.panes ||
         activePaneId != oldDelegate.activePaneId ||
-        activeColor != oldDelegate.activeColor;
+        activeColor != oldDelegate.activeColor ||
+        isDark != oldDelegate.isDark;
   }
 }
 
@@ -1289,6 +1302,8 @@ class _InputDialogContentState extends State<_InputDialogContent> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -1307,21 +1322,21 @@ class _InputDialogContentState extends State<_InputDialogContent> {
                 style: GoogleFonts.spaceGrotesk(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: Colors.white,
+                  color: colorScheme.onSurface,
                 ),
               ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: DesignColors.keyBackground,
+                  color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   'Shift+Enter: 改行',
                   style: GoogleFonts.jetBrainsMono(
                     fontSize: 10,
-                    color: DesignColors.textMuted,
+                    color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                   ),
                 ),
               ),
@@ -1334,21 +1349,21 @@ class _InputDialogContentState extends State<_InputDialogContent> {
             maxLines: null,
             minLines: 1,
             keyboardType: TextInputType.multiline,
-            style: GoogleFonts.jetBrainsMono(color: Colors.white),
+            style: GoogleFonts.jetBrainsMono(color: colorScheme.onSurface),
             decoration: InputDecoration(
               hintText: 'Type your command... (Enter to send)',
               hintStyle: GoogleFonts.jetBrainsMono(
-                color: DesignColors.textMuted,
+                color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
               ),
               filled: true,
-              fillColor: DesignColors.inputDark,
+              fillColor: isDark ? DesignColors.inputDark : DesignColors.inputLight,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: DesignColors.primary),
+                borderSide: BorderSide(color: colorScheme.primary),
               ),
               contentPadding: const EdgeInsets.all(16),
             ),
@@ -1360,8 +1375,8 @@ class _InputDialogContentState extends State<_InputDialogContent> {
                 child: OutlinedButton(
                   onPressed: () => Navigator.pop(context),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                    foregroundColor: colorScheme.onSurface,
+                    side: BorderSide(color: colorScheme.onSurface.withValues(alpha: 0.3)),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -1381,20 +1396,20 @@ class _InputDialogContentState extends State<_InputDialogContent> {
                 child: ElevatedButton(
                   onPressed: _isSending ? null : _handleSend,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: DesignColors.primary,
-                    foregroundColor: Colors.black,
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                   child: _isSending
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.black,
+                            color: colorScheme.onPrimary,
                           ),
                         )
                       : Text(

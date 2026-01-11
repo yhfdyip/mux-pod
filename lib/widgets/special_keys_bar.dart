@@ -36,11 +36,13 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        color: DesignColors.footerBackground,
+      decoration: BoxDecoration(
+        color: isDark ? DesignColors.footerBackground : DesignColors.footerBackgroundLight,
         border: Border(
-          top: BorderSide(color: Color(0xFF2A2B36), width: 1),
+          top: BorderSide(color: colorScheme.outline, width: 1),
         ),
       ),
       child: SafeArea(
@@ -59,9 +61,10 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
 
   /// 上部の修飾キー行（ESC, TAB, CTRL, ALT, ENTER, /, -, |）
   Widget _buildModifierKeysRow() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      color: DesignColors.surfaceDark,
+      color: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
       child: Row(
         children: [
           _buildSpecialKeyButton('ESC', 'Escape'),
@@ -164,6 +167,8 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
 
   /// 特殊キーボタン（tmux形式で送信）
   Widget _buildSpecialKeyButton(String label, String tmuxKey) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return Expanded(
       child: GestureDetector(
         onTapDown: (_) {
@@ -176,14 +181,14 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
           height: 32,
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
-            color: DesignColors.keyBackground,
+            color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
             borderRadius: BorderRadius.circular(4),
-            border: const Border(
-              bottom: BorderSide(color: Colors.black, width: 2),
+            border: Border(
+              bottom: BorderSide(color: isDark ? Colors.black : Colors.grey.shade400, width: 2),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
+                color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.15),
                 blurRadius: 2,
                 offset: const Offset(0, 1),
               ),
@@ -195,7 +200,7 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                color: Colors.white.withValues(alpha: 0.9),
+                color: colorScheme.onSurface.withValues(alpha: 0.9),
               ),
             ),
           ),
@@ -206,6 +211,8 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
 
   /// リテラルキーボタン（そのまま文字として送信）
   Widget _buildLiteralKeyButton(String label, String key) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return Expanded(
       child: GestureDetector(
         onTapDown: (_) {
@@ -218,14 +225,14 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
           height: 32,
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
-            color: DesignColors.keyBackground,
+            color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
             borderRadius: BorderRadius.circular(4),
-            border: const Border(
-              bottom: BorderSide(color: Colors.black, width: 2),
+            border: Border(
+              bottom: BorderSide(color: isDark ? Colors.black : Colors.grey.shade400, width: 2),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
+                color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.15),
                 blurRadius: 2,
                 offset: const Offset(0, 1),
               ),
@@ -237,7 +244,7 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                color: Colors.white.withValues(alpha: 0.9),
+                color: colorScheme.onSurface.withValues(alpha: 0.9),
               ),
             ),
           ),
@@ -247,6 +254,8 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
   }
 
   Widget _buildModifierButton(String label, bool isPressed, VoidCallback onPressed) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return Expanded(
       child: GestureDetector(
         onTapDown: (_) {
@@ -259,17 +268,17 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
           height: 32,
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
-            color: isPressed ? DesignColors.primary : DesignColors.keyBackground,
+            color: isPressed ? colorScheme.primary : (isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight),
             borderRadius: BorderRadius.circular(4),
             border: Border(
               bottom: BorderSide(
-                color: isPressed ? DesignColors.primary : Colors.black,
+                color: isPressed ? colorScheme.primary : (isDark ? Colors.black : Colors.grey.shade400),
                 width: 2,
               ),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
+                color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.15),
                 blurRadius: 2,
                 offset: const Offset(0, 1),
               ),
@@ -281,7 +290,7 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                color: isPressed ? Colors.black : DesignColors.primary,
+                color: isPressed ? colorScheme.onPrimary : colorScheme.primary,
               ),
             ),
           ),
@@ -291,6 +300,8 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
   }
 
   Widget _buildArrowButton(IconData icon, String tmuxKey) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTapDown: (_) {
         if (widget.hapticFeedback) {
@@ -302,20 +313,22 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: DesignColors.keyBackground,
+          color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
         child: Icon(
           icon,
           size: 16,
-          color: Colors.white,
+          color: colorScheme.onSurface,
         ),
       ),
     );
   }
 
   Widget _buildSmallArrowButton(IconData icon, String tmuxKey) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTapDown: (_) {
         if (widget.hapticFeedback) {
@@ -327,14 +340,14 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
         width: 36,
         height: 17,
         decoration: BoxDecoration(
-          color: DesignColors.keyBackground,
+          color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
         child: Icon(
           icon,
           size: 14,
-          color: Colors.white,
+          color: colorScheme.onSurface,
         ),
       ),
     );

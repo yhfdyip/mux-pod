@@ -78,7 +78,6 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     final keysState = ref.watch(keysProvider);
 
     return Scaffold(
-      backgroundColor: DesignColors.backgroundDark,
       appBar: _buildAppBar(),
       body: Stack(
         children: [
@@ -121,15 +120,16 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   AppBar _buildAppBar() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AppBar(
-      backgroundColor: DesignColors.backgroundDark.withValues(alpha: 0.9),
       surfaceTintColor: Colors.transparent,
       leading: TextButton(
         onPressed: () => Navigator.of(context).pop(),
         child: Text(
           'Cancel',
           style: GoogleFonts.spaceGrotesk(
-            color: DesignColors.textMuted,
+            color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -155,7 +155,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
               : Text(
                   'Save',
                   style: GoogleFonts.spaceGrotesk(
-                    color: DesignColors.primary,
+                    color: colorScheme.primary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -166,6 +166,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildSectionHeader(String title, {IconData? trailingIcon}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Row(
@@ -177,26 +179,27 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.5,
-              color: DesignColors.textMuted,
+              color: mutedColor,
             ),
           ),
           if (trailingIcon != null)
-            Icon(trailingIcon, size: 16, color: DesignColors.textMuted),
+            Icon(trailingIcon, size: 16, color: mutedColor),
         ],
       ),
     );
   }
 
   Widget _buildGeneralSection() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader('General Info', trailingIcon: Icons.info_outline),
         Container(
           decoration: BoxDecoration(
-            color: DesignColors.surfaceDark,
+            color: colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+            border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
           ),
           padding: const EdgeInsets.all(4),
           child: _buildInputField(
@@ -217,15 +220,16 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildNetworkSection() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader('Network'),
         Container(
           decoration: BoxDecoration(
-            color: DesignColors.surfaceDark,
+            color: colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+            border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
           ),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -272,6 +276,9 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildSecuritySection(KeysState keysState) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -286,7 +293,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.5,
-                  color: DesignColors.textMuted,
+                  color: mutedColor,
                 ),
               ),
               // Protocol toggle
@@ -302,9 +309,9 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
         ),
         Container(
           decoration: BoxDecoration(
-            color: DesignColors.surfaceDark,
+            color: colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+            border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
           ),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -312,7 +319,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
               // Username field
               _buildUsernameInput(),
               const SizedBox(height: 16),
-              Divider(color: Colors.white.withValues(alpha: 0.05), height: 1),
+              Divider(color: colorScheme.outline.withValues(alpha: 0.2), height: 1),
               const SizedBox(height: 16),
               // Auth method toggle
               _buildAuthMethodToggle(),
@@ -330,17 +337,20 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildProtocolBadge(String label, bool isSelected) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return GestureDetector(
       onTap: () => setState(() => _protocol = label.toLowerCase()),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: isSelected ? DesignColors.primary : Colors.white.withValues(alpha: 0.1),
+          color: isSelected ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(20),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: DesignColors.primary.withValues(alpha: 0.3),
+                    color: colorScheme.primary.withValues(alpha: 0.3),
                     blurRadius: 10,
                   ),
                 ]
@@ -351,7 +361,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           style: GoogleFonts.spaceGrotesk(
             fontSize: 10,
             fontWeight: FontWeight.w700,
-            color: isSelected ? Colors.black : DesignColors.textMuted,
+            color: isSelected ? colorScheme.onPrimary : mutedColor,
           ),
         ),
       ),
@@ -359,13 +369,14 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildFieldLabel(String label) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Text(
       label,
       style: GoogleFonts.spaceGrotesk(
         fontSize: 10,
         fontWeight: FontWeight.w500,
         letterSpacing: 1,
-        color: DesignColors.textMuted,
+        color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
       ),
     );
   }
@@ -378,6 +389,10 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     TextInputType? keyboardType,
     String? Function(String?)? validator,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return Stack(
       children: [
         TextFormField(
@@ -386,21 +401,21 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           style: GoogleFonts.spaceGrotesk(
             fontSize: 16,
             fontWeight: FontWeight.w500,
-            color: Colors.white,
+            color: colorScheme.onSurface,
           ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: GoogleFonts.spaceGrotesk(color: DesignColors.textMuted),
-            prefixIcon: Icon(prefixIcon, color: DesignColors.textMuted),
+            hintStyle: GoogleFonts.spaceGrotesk(color: mutedColor),
+            prefixIcon: Icon(prefixIcon, color: mutedColor),
             filled: true,
-            fillColor: DesignColors.inputDark,
+            fillColor: inputColor,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: DesignColors.primary, width: 2),
+              borderSide: BorderSide(color: colorScheme.primary, width: 2),
             ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
@@ -411,14 +426,14 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           top: -8,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 4),
-            color: DesignColors.surfaceDark,
+            color: colorScheme.surface,
             child: Text(
               label,
               style: GoogleFonts.spaceGrotesk(
                 fontSize: 9,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1,
-                color: DesignColors.primary,
+                color: colorScheme.primary,
               ),
             ),
           ),
@@ -428,26 +443,30 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildHostInput() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return TextFormField(
       controller: _hostController,
       keyboardType: TextInputType.url,
-      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: Colors.white),
+      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
       decoration: InputDecoration(
         hintText: '192.168.1.1 or example.com',
-        hintStyle: GoogleFonts.jetBrainsMono(color: DesignColors.textMuted.withValues(alpha: 0.5)),
+        hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
         filled: true,
-        fillColor: DesignColors.inputDark,
+        fillColor: inputColor,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: DesignColors.primary),
+          borderSide: BorderSide(color: colorScheme.primary),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         suffixIcon: Container(
@@ -458,7 +477,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
             decoration: BoxDecoration(
               color: _hostController.text.isNotEmpty
                   ? DesignColors.success
-                  : DesignColors.textMuted,
+                  : mutedColor,
               shape: BoxShape.circle,
               boxShadow: _hostController.text.isNotEmpty
                   ? [
@@ -483,26 +502,30 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildPortInput() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return TextFormField(
       controller: _portController,
       keyboardType: TextInputType.number,
-      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: Colors.white),
+      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
       decoration: InputDecoration(
         hintText: '22',
-        hintStyle: GoogleFonts.jetBrainsMono(color: DesignColors.textMuted.withValues(alpha: 0.5)),
+        hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
         filled: true,
-        fillColor: DesignColors.inputDark,
+        fillColor: inputColor,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: DesignColors.primary),
+          borderSide: BorderSide(color: colorScheme.primary),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
@@ -520,29 +543,33 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildTimeoutInput() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return Stack(
       children: [
         TextFormField(
           controller: _timeoutController,
           keyboardType: TextInputType.number,
           textAlign: TextAlign.center,
-          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: Colors.white),
+          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
           decoration: InputDecoration(
             hintText: '10',
-            hintStyle: GoogleFonts.jetBrainsMono(color: DesignColors.textMuted.withValues(alpha: 0.5)),
+            hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
             filled: true,
-            fillColor: DesignColors.inputDark,
+            fillColor: inputColor,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: DesignColors.primary),
+              borderSide: BorderSide(color: colorScheme.primary),
             ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
@@ -556,7 +583,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
               's',
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 10,
-                color: DesignColors.textMuted,
+                color: mutedColor,
               ),
             ),
           ),
@@ -566,24 +593,28 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildUsernameInput() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return Stack(
       children: [
         TextFormField(
           controller: _usernameController,
-          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: Colors.white),
+          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
           decoration: InputDecoration(
             hintText: 'root',
-            hintStyle: GoogleFonts.jetBrainsMono(color: DesignColors.textMuted.withValues(alpha: 0.5)),
-            prefixIcon: const Icon(Icons.person_outline, color: DesignColors.textMuted, size: 20),
+            hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
+            prefixIcon: Icon(Icons.person_outline, color: mutedColor, size: 20),
             filled: true,
-            fillColor: DesignColors.inputDark,
+            fillColor: inputColor,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: DesignColors.primary),
+              borderSide: BorderSide(color: colorScheme.primary),
             ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
@@ -603,7 +634,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
               'USER',
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 10,
-                color: DesignColors.textMuted.withValues(alpha: 0.5),
+                color: mutedColor.withValues(alpha: 0.5),
               ),
             ),
           ),
@@ -613,9 +644,12 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildAuthMethodToggle() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.4),
+        color: colorScheme.onSurface.withValues(alpha: isDark ? 0.1 : 0.05),
         borderRadius: BorderRadius.circular(8),
       ),
       padding: const EdgeInsets.all(4),
@@ -628,7 +662,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
                   color: _authMethod == 'password'
-                      ? DesignColors.primary
+                      ? colorScheme.primary
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
                   boxShadow: _authMethod == 'password'
@@ -648,8 +682,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: _authMethod == 'password'
-                        ? Colors.black
-                        : DesignColors.textMuted,
+                        ? colorScheme.onPrimary
+                        : mutedColor,
                   ),
                 ),
               ),
@@ -662,7 +696,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
                   color: _authMethod == 'key'
-                      ? DesignColors.primary
+                      ? colorScheme.primary
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
                   boxShadow: _authMethod == 'key'
@@ -682,8 +716,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: _authMethod == 'key'
-                        ? Colors.black
-                        : DesignColors.textMuted,
+                        ? colorScheme.onPrimary
+                        : mutedColor,
                   ),
                 ),
               ),
@@ -695,31 +729,35 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildPasswordInput() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return TextFormField(
       controller: _passwordController,
       obscureText: _obscurePassword,
-      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: Colors.white),
+      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
       decoration: InputDecoration(
         hintText: '••••••••••••',
-        hintStyle: GoogleFonts.jetBrainsMono(color: DesignColors.textMuted.withValues(alpha: 0.5)),
-        prefixIcon: const Icon(Icons.key, color: DesignColors.textMuted, size: 20),
+        hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
+        prefixIcon: Icon(Icons.key, color: mutedColor, size: 20),
         suffixIcon: IconButton(
           icon: Icon(
             _obscurePassword ? Icons.visibility_off : Icons.visibility,
-            color: DesignColors.textMuted,
+            color: mutedColor,
             size: 20,
           ),
           onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
         ),
         filled: true,
-        fillColor: DesignColors.inputDark,
+        fillColor: inputColor,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: DesignColors.primary),
+          borderSide: BorderSide(color: colorScheme.primary),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
@@ -733,23 +771,27 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildKeyDropdown(KeysState keysState) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DropdownButtonFormField<String>(
           value: _selectedKeyId,
           decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.vpn_key_outlined, color: DesignColors.textMuted, size: 20),
+            prefixIcon: Icon(Icons.vpn_key_outlined, color: mutedColor, size: 20),
             filled: true,
-            fillColor: DesignColors.inputDark,
+            fillColor: inputColor,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
-          dropdownColor: DesignColors.surfaceDark,
-          style: GoogleFonts.spaceGrotesk(fontSize: 14, color: Colors.white),
+          dropdownColor: colorScheme.surface,
+          style: GoogleFonts.spaceGrotesk(fontSize: 14, color: colorScheme.onSurface),
           items: keysState.keys.map((key) {
             return DropdownMenuItem(
               value: key.id,
@@ -765,7 +807,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           },
           hint: Text(
             keysState.keys.isEmpty ? 'No keys available' : 'Select a key',
-            style: GoogleFonts.spaceGrotesk(color: DesignColors.textMuted),
+            style: GoogleFonts.spaceGrotesk(color: mutedColor),
           ),
         ),
         if (_authMethod == 'key' && keysState.keys.isEmpty) ...[
@@ -774,7 +816,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
             'No SSH keys found. Add keys in the Keys section.',
             style: GoogleFonts.spaceGrotesk(
               fontSize: 12,
-              color: DesignColors.error,
+              color: colorScheme.error,
             ),
           ),
         ],
@@ -783,6 +825,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   }
 
   Widget _buildAdvancedToggle() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return Center(
       child: TextButton.icon(
         onPressed: () {
@@ -793,19 +837,20 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           style: GoogleFonts.spaceGrotesk(
             fontSize: 12,
             fontWeight: FontWeight.w500,
-            color: DesignColors.textMuted,
+            color: mutedColor,
           ),
         ),
-        label: const Icon(
+        label: Icon(
           Icons.expand_more,
           size: 16,
-          color: DesignColors.textMuted,
+          color: mutedColor,
         ),
       ),
     );
   }
 
   Widget _buildBottomAction() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Positioned(
       left: 0,
       right: 0,
@@ -817,9 +862,9 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              DesignColors.backgroundDark.withValues(alpha: 0),
-              DesignColors.backgroundDark,
-              DesignColors.backgroundDark,
+              Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0),
+              Theme.of(context).scaffoldBackgroundColor,
+              Theme.of(context).scaffoldBackgroundColor,
             ],
           ),
         ),
@@ -830,20 +875,20 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
             child: ElevatedButton(
               onPressed: _isTesting ? null : _testConnection,
               style: ElevatedButton.styleFrom(
-                backgroundColor: DesignColors.primary,
-                foregroundColor: Colors.black,
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
                 elevation: 0,
               ),
               child: _isTesting
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.black,
+                        color: colorScheme.onPrimary,
                       ),
                     )
                   : Row(
