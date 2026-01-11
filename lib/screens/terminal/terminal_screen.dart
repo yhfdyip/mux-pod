@@ -588,61 +588,73 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: DesignColors.surfaceDark,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.6;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.folder, color: DesignColors.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Select Session',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder, color: DesignColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Select Session',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(height: 1, color: Color(0xFF2A2B36)),
-              ...tmuxState.sessions.map((session) {
-                final isActive = session.name == tmuxState.activeSessionName;
-                return ListTile(
-                  leading: Icon(
-                    Icons.folder,
-                    color: isActive ? DesignColors.primary : Colors.white60,
+                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: tmuxState.sessions.length,
+                    itemBuilder: (context, index) {
+                      final session = tmuxState.sessions[index];
+                      final isActive = session.name == tmuxState.activeSessionName;
+                      return ListTile(
+                        leading: Icon(
+                          Icons.folder,
+                          color: isActive ? DesignColors.primary : Colors.white60,
+                        ),
+                        title: Text(
+                          session.name,
+                          style: TextStyle(
+                            color: isActive ? DesignColors.primary : Colors.white,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${session.windowCount} windows',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                        trailing: isActive
+                            ? Icon(Icons.check, color: DesignColors.primary)
+                            : null,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectSession(session.name);
+                        },
+                      );
+                    },
                   ),
-                  title: Text(
-                    session.name,
-                    style: TextStyle(
-                      color: isActive ? DesignColors.primary : Colors.white,
-                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${session.windowCount} windows',
-                    style: const TextStyle(color: Colors.white38),
-                  ),
-                  trailing: isActive
-                      ? Icon(Icons.check, color: DesignColors.primary)
-                      : null,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _selectSession(session.name);
-                  },
-                );
-              }),
-              const SizedBox(height: 16),
-            ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         );
       },
@@ -657,61 +669,73 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: DesignColors.surfaceDark,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.6;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.tab, color: DesignColors.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Select Window',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.tab, color: DesignColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Select Window',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(height: 1, color: Color(0xFF2A2B36)),
-              ...session.windows.map((window) {
-                final isActive = window.index == tmuxState.activeWindowIndex;
-                return ListTile(
-                  leading: Icon(
-                    Icons.tab,
-                    color: isActive ? DesignColors.primary : Colors.white60,
+                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: session.windows.length,
+                    itemBuilder: (context, index) {
+                      final window = session.windows[index];
+                      final isActive = window.index == tmuxState.activeWindowIndex;
+                      return ListTile(
+                        leading: Icon(
+                          Icons.tab,
+                          color: isActive ? DesignColors.primary : Colors.white60,
+                        ),
+                        title: Text(
+                          '${window.index}: ${window.name}',
+                          style: TextStyle(
+                            color: isActive ? DesignColors.primary : Colors.white,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${window.paneCount} panes',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                        trailing: isActive
+                            ? Icon(Icons.check, color: DesignColors.primary)
+                            : null,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectWindow(session.name, window.index);
+                        },
+                      );
+                    },
                   ),
-                  title: Text(
-                    '${window.index}: ${window.name}',
-                    style: TextStyle(
-                      color: isActive ? DesignColors.primary : Colors.white,
-                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${window.paneCount} panes',
-                    style: const TextStyle(color: Colors.white38),
-                  ),
-                  trailing: isActive
-                      ? Icon(Icons.check, color: DesignColors.primary)
-                      : null,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _selectWindow(session.name, window.index);
-                  },
-                );
-              }),
-              const SizedBox(height: 16),
-            ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         );
       },
@@ -726,61 +750,73 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: DesignColors.surfaceDark,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.6;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.terminal, color: DesignColors.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Select Pane',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.terminal, color: DesignColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Select Pane',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(height: 1, color: Color(0xFF2A2B36)),
-              ...window.panes.map((pane) {
-                final isActive = pane.id == tmuxState.activePaneId;
-                return ListTile(
-                  leading: Icon(
-                    Icons.terminal,
-                    color: isActive ? DesignColors.primary : Colors.white60,
+                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: window.panes.length,
+                    itemBuilder: (context, index) {
+                      final pane = window.panes[index];
+                      final isActive = pane.id == tmuxState.activePaneId;
+                      return ListTile(
+                        leading: Icon(
+                          Icons.terminal,
+                          color: isActive ? DesignColors.primary : Colors.white60,
+                        ),
+                        title: Text(
+                          'Pane ${pane.index}',
+                          style: TextStyle(
+                            color: isActive ? DesignColors.primary : Colors.white,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${pane.width}x${pane.height}',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                        trailing: isActive
+                            ? Icon(Icons.check, color: DesignColors.primary)
+                            : null,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectPane(pane.id);
+                        },
+                      );
+                    },
                   ),
-                  title: Text(
-                    'Pane ${pane.index}',
-                    style: TextStyle(
-                      color: isActive ? DesignColors.primary : Colors.white,
-                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${pane.width}x${pane.height}',
-                    style: const TextStyle(color: Colors.white38),
-                  ),
-                  trailing: isActive
-                      ? Icon(Icons.check, color: DesignColors.primary)
-                      : null,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _selectPane(pane.id);
-                  },
-                );
-              }),
-              const SizedBox(height: 16),
-            ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         );
       },
