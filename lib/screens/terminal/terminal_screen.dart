@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:xterm/xterm.dart';
 
 import '../../providers/connection_provider.dart';
 import '../../providers/ssh_provider.dart';
@@ -13,7 +12,8 @@ import '../../services/ssh/ssh_client.dart' show SshConnectOptions;
 import '../../services/tmux/tmux_commands.dart';
 import '../../theme/design_colors.dart';
 import '../../widgets/special_keys_bar.dart';
-// session_drawer.dart は使用しない（デザイン仕様外）
+import '../../providers/terminal_display_provider.dart';
+import 'widgets/ansi_text_view.dart';
 
 /// ターミナル画面（HTMLデザイン仕様準拠）
 class TerminalScreen extends ConsumerStatefulWidget {
@@ -31,8 +31,6 @@ class TerminalScreen extends ConsumerStatefulWidget {
 }
 
 class _TerminalScreenState extends ConsumerState<TerminalScreen> {
-  late Terminal _terminal;
-  final _terminalController = TerminalController();
   final _secureStorage = SecureStorageService();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -47,9 +45,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   // ポーリング用タイマー
   Timer? _pollTimer;
   Timer? _treeRefreshTimer;
-  String _lastContent = '';
+  String _terminalContent = '';
   bool _isPolling = false;
   bool _isDisposed = false;
+
+  // 現在のペインサイズ
+  int _paneWidth = 80;
+  int _paneHeight = 24;
 
   // Riverpodリスナー
   ProviderSubscription<SshState>? _sshSubscription;
@@ -58,7 +60,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   @override
   void initState() {
     super.initState();
-    _terminal = Terminal(maxLines: 10000);
 
     // 次フレームでリスナーを設定（ref使用のため）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -151,10 +152,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       // 6. アクティブセッション/ウィンドウ/ペインを設定
       ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
 
-      // 7. 100msポーリング開始
+      // 7. TerminalDisplayProviderにペイン情報を通知（フォントサイズ計算用）
+      final activePane = ref.read(tmuxProvider).activePane;
+      if (activePane != null) {
+        debugPrint('[Terminal] Pane size: ${activePane.width}x${activePane.height}');
+        ref.read(terminalDisplayProvider.notifier).updatePane(activePane);
+        setState(() {
+          _paneWidth = activePane.width;
+          _paneHeight = activePane.height;
+        });
+      }
+
+      // 8. 100msポーリング開始
       _startPolling();
 
-      // 8. 5秒ごとにセッションツリーを更新
+      // 9. 5秒ごとにセッションツリーを更新
       _startTreeRefresh();
 
       if (!mounted) return;
@@ -236,16 +248,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       if (!mounted || _isDisposed) return;
 
       // レイテンシを更新
-      setState(() {
-        _latency = endTime.difference(startTime).inMilliseconds;
-      });
+      final latency = endTime.difference(startTime).inMilliseconds;
 
       // 差分があれば更新
-      if (output != _lastContent) {
-        _lastContent = output;
-        // ターミナルをクリアして新しい内容を書き込む
-        _terminal.write('\x1b[2J\x1b[H'); // 画面クリア + カーソルホーム
-        _terminal.write(output);
+      if (output != _terminalContent || latency != _latency) {
+        setState(() {
+          _latency = latency;
+          _terminalContent = output;
+        });
       }
     } catch (e) {
       // ポーリングエラーは静かに無視（接続エラーは別途ハンドリング）
@@ -295,9 +305,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _pollTimer = null;
     _treeRefreshTimer?.cancel();
     _treeRefreshTimer = null;
-    _terminalController.dispose();
-    // SSH接続をクリーンアップ（refは使わずに直接クライアントを操作）
-    // dispose時にはref.readを避ける
     super.dispose();
   }
 
@@ -318,18 +325,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               Expanded(
                 child: Stack(
                   children: [
-                    TerminalView(
-                      _terminal,
-                      controller: _terminalController,
-                      autofocus: true,
-                      backgroundOpacity: 1.0,
-                      theme: _buildTerminalTheme(),
-                      textStyle: TerminalStyle.fromTextStyle(
-                        GoogleFonts.jetBrainsMono(
-                          fontSize: 12,
-                          height: 1.4,
-                        ),
-                      ),
+                    AnsiTextView(
+                      text: _terminalContent,
+                      paneWidth: _paneWidth,
+                      paneHeight: _paneHeight,
+                      backgroundColor: DesignColors.backgroundDark,
+                      foregroundColor: Colors.white.withValues(alpha: 0.9),
+                      onKeyInput: _handleKeyInput,
                     ),
                     // Pane indicator (右上)
                     Positioned(
@@ -363,6 +365,27 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     );
   }
 
+  /// AnsiTextViewからのキー入力を処理
+  void _handleKeyInput(KeyInputEvent event) {
+    // キー入力をtmux send-keysで送信
+    _sendKeyData(event.data);
+  }
+
+  /// キーデータをtmux send-keysで送信
+  Future<void> _sendKeyData(String data) async {
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null || !sshClient.isConnected) return;
+
+    final target = ref.read(tmuxProvider.notifier).currentTarget;
+    if (target == null) return;
+
+    try {
+      // エスケープシーケンスや特殊キーはリテラルで送信
+      await sshClient.exec(TmuxCommands.sendKeys(target, data, literal: true));
+    } catch (_) {
+      // キー送信エラーは静かに無視
+    }
+  }
 
   /// セッションを選択
   Future<void> _selectSession(String sessionName) async {
@@ -373,7 +396,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
 
     // ターミナル内容をクリアして再取得
-    _lastContent = '';
+    setState(() {
+      _terminalContent = '';
+    });
   }
 
   /// ウィンドウを選択
@@ -395,7 +420,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     ref.read(tmuxProvider.notifier).setActiveWindow(windowIndex);
 
     // ターミナル内容をクリアして再取得
-    _lastContent = '';
+    setState(() {
+      _terminalContent = '';
+    });
   }
 
   /// ペインを選択
@@ -410,8 +437,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     // tmux_providerでアクティブペインを更新
     ref.read(tmuxProvider.notifier).setActivePane(paneId);
 
-    // ターミナル内容をクリアして再取得
-    _lastContent = '';
+    // TerminalDisplayProviderにペイン情報を通知（フォントサイズ計算用）
+    final activePane = ref.read(tmuxProvider).activePane;
+    if (activePane != null) {
+      ref.read(terminalDisplayProvider.notifier).updatePane(activePane);
+      setState(() {
+        _paneWidth = activePane.width;
+        _paneHeight = activePane.height;
+        _terminalContent = '';
+      });
+    }
   }
 
   /// エラーオーバーレイ
@@ -922,34 +957,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  TerminalTheme _buildTerminalTheme() {
-    return TerminalTheme(
-      cursor: DesignColors.primary,
-      selection: DesignColors.primary.withValues(alpha: 0.3),
-      foreground: Colors.white.withValues(alpha: 0.9),
-      background: DesignColors.backgroundDark,
-      black: const Color(0xFF000000),
-      red: DesignColors.terminalRed,
-      green: DesignColors.terminalGreen,
-      yellow: DesignColors.terminalYellow,
-      blue: DesignColors.terminalBlue,
-      magenta: DesignColors.terminalMagenta,
-      cyan: DesignColors.terminalCyan,
-      white: const Color(0xFFE0E0E0),
-      brightBlack: const Color(0xFF808080),
-      brightRed: const Color(0xFFFF6B6B),
-      brightGreen: const Color(0xFF69FF94),
-      brightYellow: const Color(0xFFFFF36D),
-      brightBlue: const Color(0xFF76A9FA),
-      brightMagenta: const Color(0xFFD4A5FF),
-      brightCyan: const Color(0xFF7FDBFF),
-      brightWhite: const Color(0xFFFFFFFF),
-      searchHitBackground: DesignColors.primary.withValues(alpha: 0.3),
-      searchHitBackgroundCurrent: DesignColors.primary.withValues(alpha: 0.5),
-      searchHitForeground: Colors.white,
     );
   }
 

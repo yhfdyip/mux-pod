@@ -370,21 +370,21 @@ class SshClient {
     try {
       final session = await _client!.execute(command);
 
-      // 出力を収集
-      final stdout = StringBuffer();
-      final stderr = StringBuffer();
+      // 出力を収集（バイト列として収集し、最後にデコード）
+      final stdoutBytes = <int>[];
+      final stderrBytes = <int>[];
 
       final stdoutCompleter = Completer<void>();
       final stderrCompleter = Completer<void>();
 
       session.stdout.listen(
-        (data) => stdout.write(utf8.decode(data)),
+        (data) => stdoutBytes.addAll(data),
         onDone: () => stdoutCompleter.complete(),
         onError: (e) => stdoutCompleter.completeError(e),
       );
 
       session.stderr.listen(
-        (data) => stderr.write(utf8.decode(data)),
+        (data) => stderrBytes.addAll(data),
         onDone: () => stderrCompleter.complete(),
         onError: (e) => stderrCompleter.completeError(e),
       );
@@ -404,14 +404,17 @@ class SshClient {
 
       session.close();
 
+      // バイト列をUTF-8デコード（不正なバイトは置換文字に）
+      final stdout = utf8.decode(stdoutBytes, allowMalformed: true);
+      final stderr = utf8.decode(stderrBytes, allowMalformed: true);
+
       // stderrがあればエラーとして扱う（オプション）
-      final result = stdout.toString();
       if (stderr.isNotEmpty) {
         // stderrも結果に含める（tmuxコマンドなどはstderrに出力することがある）
-        return result + stderr.toString();
+        return stdout + stderr;
       }
 
-      return result;
+      return stdout;
     } on TimeoutException {
       throw SshConnectionError('Command execution timed out');
     } catch (e) {
