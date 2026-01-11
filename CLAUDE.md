@@ -100,3 +100,10 @@ class TmuxPane {
 - SSH鍵: flutter_secure_storage（暗号化）
 - パスワード: flutter_secure_storage（暗号化）
 - 生体認証対応（local_auth）
+
+## Active Technologies
+- Dart 3.x / Flutter 3.24+ + flutter_riverpod, shared_preferences, flutter_local_notifications, url_launcher (001-settings-notifications)
+- SharedPreferences（設定）、SharedPreferences（通知ルール - JSON形式） (001-settings-notifications)
+
+## Recent Changes
+- 001-settings-notifications: Added Dart 3.x / Flutter 3.24+ + flutter_riverpod, shared_preferences, flutter_local_notifications, url_launcher
