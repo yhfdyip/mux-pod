@@ -49,6 +49,9 @@ class AnsiTextView extends ConsumerStatefulWidget {
   /// 前景色
   final Color foregroundColor;
 
+  /// 外部から渡される垂直スクロールコントローラー（オプション）
+  final ScrollController? verticalScrollController;
+
   const AnsiTextView({
     super.key,
     required this.text,
@@ -57,6 +60,7 @@ class AnsiTextView extends ConsumerStatefulWidget {
     this.onKeyInput,
     this.backgroundColor = const Color(0xFF1E1E1E),
     this.foregroundColor = const Color(0xFFD4D4D4),
+    this.verticalScrollController,
   });
 
   @override
@@ -66,7 +70,11 @@ class AnsiTextView extends ConsumerStatefulWidget {
 class _AnsiTextViewState extends ConsumerState<AnsiTextView> {
   final FocusNode _focusNode = FocusNode();
   final ScrollController _horizontalScrollController = ScrollController();
-  final ScrollController _verticalScrollController = ScrollController();
+  ScrollController? _internalVerticalScrollController;
+
+  /// 使用する垂直スクロールコントローラー
+  ScrollController get _verticalScrollController =>
+      widget.verticalScrollController ?? _internalVerticalScrollController!;
 
   late AnsiParser _parser;
 
@@ -84,6 +92,10 @@ class _AnsiTextViewState extends ConsumerState<AnsiTextView> {
   @override
   void initState() {
     super.initState();
+    // 外部からScrollControllerが渡されていない場合は内部で作成
+    if (widget.verticalScrollController == null) {
+      _internalVerticalScrollController = ScrollController();
+    }
     _parser = AnsiParser(
       defaultForeground: widget.foregroundColor,
       defaultBackground: widget.backgroundColor,
@@ -142,7 +154,8 @@ class _AnsiTextViewState extends ConsumerState<AnsiTextView> {
   void dispose() {
     _focusNode.dispose();
     _horizontalScrollController.dispose();
-    _verticalScrollController.dispose();
+    // 内部で作成した場合のみ破棄
+    _internalVerticalScrollController?.dispose();
     super.dispose();
   }
 
@@ -471,6 +484,34 @@ class _AnsiTextViewState extends ConsumerState<AnsiTextView> {
       _ctrlPressed = false;
       _altPressed = false;
       _shiftPressed = false;
+    });
+  }
+
+  // === スクロール制御 ===
+
+  /// 一番下までスクロール
+  void scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_verticalScrollController.hasClients) {
+        _verticalScrollController.animateTo(
+          _verticalScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  /// 一番上までスクロール
+  void scrollToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_verticalScrollController.hasClients) {
+        _verticalScrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 }
