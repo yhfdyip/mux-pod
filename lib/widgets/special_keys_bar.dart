@@ -318,72 +318,12 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
     );
   }
 
-  /// DirectInput専用行（入力フィールド + Enter/Backspaceボタン）
+  /// DirectInput専用行（入力フィールドのみ）
+  /// RET/BSはネイティブキーボードのものを使用
   Widget _buildDirectInputRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
-        children: [
-          // Backspaceボタン
-          _buildDirectKeyButton(
-            icon: Icons.backspace_outlined,
-            label: 'BS',
-            onTap: _sendDirectBackspace,
-            color: DesignColors.warning,
-          ),
-          const SizedBox(width: 4),
-          // 入力フィールド（横幅いっぱいに）
-          Expanded(child: _buildDirectInputField()),
-          const SizedBox(width: 4),
-          // Enterボタン
-          _buildDirectKeyButton(
-            icon: Icons.keyboard_return,
-            label: 'RET',
-            onTap: _sendDirectEnter,
-            color: DesignColors.primary,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// DirectInput用のキーボタン（Enter/Backspace）
-  Widget _buildDirectKeyButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    required Color color,
-  }) {
-    return GestureDetector(
-      onTapDown: (_) {
-        if (widget.hapticFeedback) {
-          HapticFeedback.lightImpact();
-        }
-      },
-      onTap: onTap,
-      child: Container(
-        width: 48,
-        height: 40,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 16, color: color),
-            Text(
-              label,
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 8,
-                fontWeight: FontWeight.w700,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-      ),
+      child: _buildDirectInputField(),
     );
   }
 
@@ -746,6 +686,16 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
     }
 
     String key = tmuxKey;
+
+    // 特殊なケース: Shift+Tab → BTab (Back Tab)
+    if (_shiftPressed && tmuxKey == 'Tab') {
+      setState(() => _shiftPressed = false);
+      // Ctrl/Altの状態もリセット
+      if (_ctrlPressed) setState(() => _ctrlPressed = false);
+      if (_altPressed) setState(() => _altPressed = false);
+      widget.onSpecialKeyPressed('BTab');
+      return;
+    }
 
     // 修飾子を組み合わせる（Shift, Ctrl, Alt順）
     final List<String> modifiers = [];
