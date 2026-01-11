@@ -225,8 +225,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _isPolling = true;
 
     try {
-      final sshClient = ref.read(sshProvider.notifier).client;
+      final sshNotifier = ref.read(sshProvider.notifier);
+      final sshClient = sshNotifier.client;
+
+      // 接続が切れている場合は自動再接続を試みる
       if (sshClient == null || !sshClient.isConnected) {
+        // すでに再接続中でなければ再接続を開始
+        final currentState = ref.read(sshProvider);
+        if (!currentState.isReconnecting) {
+          _attemptReconnect();
+        }
         _isPolling = false;
         return;
       }
@@ -259,9 +267,33 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         });
       }
     } catch (e) {
-      // ポーリングエラーは静かに無視（接続エラーは別途ハンドリング）
+      // 通信エラーの場合は自動再接続を試みる
+      if (!_isDisposed) {
+        final currentState = ref.read(sshProvider);
+        if (!currentState.isReconnecting) {
+          _attemptReconnect();
+        }
+      }
     } finally {
       _isPolling = false;
+    }
+  }
+
+  /// 自動再接続を試みる
+  Future<void> _attemptReconnect() async {
+    if (_isDisposed) return;
+
+    final sshNotifier = ref.read(sshProvider.notifier);
+    final success = await sshNotifier.reconnect();
+
+    if (!mounted || _isDisposed) return;
+
+    if (!success) {
+      // 再接続失敗時は再試行（最大回数に達するまで）
+      final currentState = ref.read(sshProvider);
+      if (currentState.reconnectAttempt < 5) {
+        // 次のポーリングで再試行される
+      }
     }
   }
 
@@ -537,32 +569,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                 ),
               ),
             ),
-            // Latency indicator
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: const BoxDecoration(
-                border: Border(
-                  left: BorderSide(color: Color(0xFF2A2B36), width: 1),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.bolt,
-                    size: 10,
-                    color: DesignColors.primary.withValues(alpha: 0.8),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${_latency}ms',
-                    style: GoogleFonts.jetBrainsMono(
-                      fontSize: 10,
-                      color: DesignColors.primary.withValues(alpha: 0.8),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // Latency / Reconnect indicator
+            _buildConnectionIndicator(),
             // Settings button
             IconButton(
               onPressed: () {},
@@ -889,6 +897,93 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
           color: Colors.white.withValues(alpha: 0.2),
         ),
       ),
+    );
+  }
+
+  /// 接続状態インジケーター（レイテンシまたは再接続状態を表示）
+  Widget _buildConnectionIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: const BoxDecoration(
+        border: Border(
+          left: BorderSide(color: Color(0xFF2A2B36), width: 1),
+        ),
+      ),
+      child: _sshState.isReconnecting
+          ? _buildReconnectingIndicator()
+          : _buildLatencyIndicator(),
+    );
+  }
+
+  /// レイテンシ表示
+  Widget _buildLatencyIndicator() {
+    // レイテンシに応じた色を決定
+    Color indicatorColor;
+    if (_latency < 100) {
+      indicatorColor = DesignColors.success; // 緑: 良好
+    } else if (_latency < 300) {
+      indicatorColor = DesignColors.primary; // シアン: 普通
+    } else if (_latency < 500) {
+      indicatorColor = DesignColors.warning; // オレンジ: やや遅い
+    } else {
+      indicatorColor = DesignColors.error; // 赤: 遅い
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.bolt,
+          size: 10,
+          color: indicatorColor.withValues(alpha: 0.8),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '${_latency}ms',
+          style: GoogleFonts.jetBrainsMono(
+            fontSize: 10,
+            color: indicatorColor.withValues(alpha: 0.8),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 再接続中インジケーター
+  Widget _buildReconnectingIndicator() {
+    final attempt = _sshState.reconnectAttempt;
+    final delayMs = _sshState.reconnectDelayMs ?? 0;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 10,
+          height: 10,
+          child: CircularProgressIndicator(
+            strokeWidth: 1.5,
+            color: DesignColors.warning.withValues(alpha: 0.8),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          'Reconnecting${attempt > 1 ? ' ($attempt)' : ''}',
+          style: GoogleFonts.jetBrainsMono(
+            fontSize: 10,
+            color: DesignColors.warning.withValues(alpha: 0.8),
+          ),
+        ),
+        if (delayMs > 0) ...[
+          const SizedBox(width: 4),
+          Text(
+            '${delayMs}ms',
+            style: GoogleFonts.jetBrainsMono(
+              fontSize: 9,
+              color: DesignColors.textMuted,
+            ),
+          ),
+        ],
+      ],
     );
   }
 
