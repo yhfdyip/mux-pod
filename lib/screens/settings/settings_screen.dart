@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/dialogs/font_size_dialog.dart';
 import '../../widgets/dialogs/font_family_dialog.dart';
+import '../../widgets/dialogs/min_font_size_dialog.dart';
 import '../../widgets/dialogs/theme_dialog.dart';
 import '../notifications/notification_rules_screen.dart';
 
@@ -52,6 +53,22 @@ class SettingsScreen extends ConsumerWidget {
               );
               if (family != null) {
                 ref.read(settingsProvider.notifier).setFontFamily(family);
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.format_size),
+            title: const Text('Minimum Font Size'),
+            subtitle: Text('${settings.minFontSize.toInt()} pt (auto-fit limit)'),
+            onTap: () async {
+              final size = await showDialog<double>(
+                context: context,
+                builder: (context) => MinFontSizeDialog(
+                  currentSize: settings.minFontSize,
+                ),
+              );
+              if (size != null) {
+                ref.read(settingsProvider.notifier).setMinFontSize(size);
               }
             },
           ),

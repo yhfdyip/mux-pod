@@ -11,6 +11,8 @@ class AppSettings {
   final bool enableVibration;
   final bool keepScreenOn;
   final int scrollbackLines;
+  final double minFontSize;
+  final bool autoFitEnabled;
 
   const AppSettings({
     this.darkMode = true,
@@ -21,6 +23,8 @@ class AppSettings {
     this.enableVibration = true,
     this.keepScreenOn = true,
     this.scrollbackLines = 10000,
+    this.minFontSize = 8.0,
+    this.autoFitEnabled = true,
   });
 
   AppSettings copyWith({
@@ -32,6 +36,8 @@ class AppSettings {
     bool? enableVibration,
     bool? keepScreenOn,
     int? scrollbackLines,
+    double? minFontSize,
+    bool? autoFitEnabled,
   }) {
     return AppSettings(
       darkMode: darkMode ?? this.darkMode,
@@ -42,6 +48,8 @@ class AppSettings {
       enableVibration: enableVibration ?? this.enableVibration,
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
       scrollbackLines: scrollbackLines ?? this.scrollbackLines,
+      minFontSize: minFontSize ?? this.minFontSize,
+      autoFitEnabled: autoFitEnabled ?? this.autoFitEnabled,
     );
   }
 }
@@ -56,6 +64,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
   static const String _vibrationKey = 'settings_vibration';
   static const String _keepScreenOnKey = 'settings_keep_screen_on';
   static const String _scrollbackKey = 'settings_scrollback';
+  static const String _minFontSizeKey = 'settings_min_font_size';
+  static const String _autoFitEnabledKey = 'settings_auto_fit_enabled';
 
   @override
   AppSettings build() {
@@ -75,6 +85,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       enableVibration: prefs.getBool(_vibrationKey) ?? true,
       keepScreenOn: prefs.getBool(_keepScreenOnKey) ?? true,
       scrollbackLines: prefs.getInt(_scrollbackKey) ?? 10000,
+      minFontSize: prefs.getDouble(_minFontSizeKey) ?? 8.0,
+      autoFitEnabled: prefs.getBool(_autoFitEnabledKey) ?? true,
     );
   }
 
@@ -137,6 +149,18 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> setScrollbackLines(int value) async {
     state = state.copyWith(scrollbackLines: value);
     await _saveSetting(_scrollbackKey, value);
+  }
+
+  /// 最小フォントサイズを設定
+  Future<void> setMinFontSize(double value) async {
+    state = state.copyWith(minFontSize: value);
+    await _saveSetting(_minFontSizeKey, value);
+  }
+
+  /// 自動フィットを設定
+  Future<void> setAutoFitEnabled(bool value) async {
+    state = state.copyWith(autoFitEnabled: value);
+    await _saveSetting(_autoFitEnabledKey, value);
   }
 
   /// リロード
