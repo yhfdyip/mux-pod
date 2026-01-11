@@ -3,8 +3,8 @@
 /// tmuxコマンドの出力をパースしてオブジェクトに変換する。
 /// フォーマット文字列に対応したパーサーを提供。
 class TmuxParser {
-  /// デフォルトのフィールド区切り文字
-  static const String defaultDelimiter = '\t';
+  /// デフォルトのフィールド区切り文字（SSH経由でタブが変換されるため|||を使用）
+  static const String defaultDelimiter = '|||';
 
   // ===== セッション =====
 
