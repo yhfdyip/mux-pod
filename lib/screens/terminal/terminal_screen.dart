@@ -9,11 +9,11 @@ import '../../providers/connection_provider.dart';
 import '../../providers/ssh_provider.dart';
 import '../../providers/tmux_provider.dart';
 import '../../services/keychain/secure_storage.dart';
-import '../../services/ssh/ssh_client.dart';
+import '../../services/ssh/ssh_client.dart' show SshConnectOptions;
 import '../../services/tmux/tmux_commands.dart';
-import '../../services/tmux/tmux_parser.dart';
 import '../../theme/design_colors.dart';
 import '../../widgets/special_keys_bar.dart';
+// session_drawer.dart は使用しない（デザイン仕様外）
 
 /// ターミナル画面（HTMLデザイン仕様準拠）
 class TerminalScreen extends ConsumerStatefulWidget {
@@ -34,32 +34,72 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   late Terminal _terminal;
   final _terminalController = TerminalController();
   final _secureStorage = SecureStorageService();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // 接続状態
+  // 接続状態（ローカルで管理）
   bool _isConnecting = false;
   String? _connectionError;
+  SshState _sshState = const SshState();
 
-  // UI表示用
-  String _currentSession = '';
-  String _currentWindow = '';
-  int _currentWindowIndex = 0;
-  int _currentPaneIndex = 0;
+  // レイテンシ表示用
   int _latency = 0;
 
   // ポーリング用タイマー
   Timer? _pollTimer;
+  Timer? _treeRefreshTimer;
   String _lastContent = '';
   bool _isPolling = false;
+  bool _isDisposed = false;
+
+  // Riverpodリスナー
+  ProviderSubscription<SshState>? _sshSubscription;
+  ProviderSubscription<TmuxState>? _tmuxSubscription;
 
   @override
   void initState() {
     super.initState();
     _terminal = Terminal(maxLines: 10000);
-    _connectAndSetup();
+
+    // 次フレームでリスナーを設定（ref使用のため）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _setupListeners();
+      _connectAndSetup();
+    });
+  }
+
+  /// Providerのリスナーを設定
+  void _setupListeners() {
+    // SSH状態の変化を監視
+    _sshSubscription = ref.listenManual<SshState>(
+      sshProvider,
+      (previous, next) {
+        if (!mounted || _isDisposed) return;
+        setState(() {
+          _sshState = next;
+        });
+      },
+      fireImmediately: true,
+    );
+
+    // Tmux状態の変化を監視（UIリビルド用）
+    _tmuxSubscription = ref.listenManual<TmuxState>(
+      tmuxProvider,
+      (previous, next) {
+        if (!mounted || _isDisposed) return;
+        setState(() {
+          // tmuxStateはbuild内で直接読み取る
+        });
+      },
+      fireImmediately: true,
+    );
   }
 
   /// SSH接続してtmuxセッションをセットアップ
   Future<void> _connectAndSetup() async {
+    if (!mounted) {
+      return;
+    }
     setState(() {
       _isConnecting = true;
       _connectionError = null;
@@ -74,59 +114,90 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
       // 2. 認証情報を取得
       final options = await _getAuthOptions(connection);
+      if (!mounted || _isDisposed) {
+        return;
+      }
 
       // 3. SSH接続（シェルは起動しない - execのみ使用）
       final sshNotifier = ref.read(sshProvider.notifier);
       await sshNotifier.connectWithoutShell(connection, options);
-
-      // 4. tmuxセッション一覧を取得
-      final sshClient = sshNotifier.client;
-      final sessionsOutput = await sshClient?.exec(TmuxCommands.listSessions());
-      if (sessionsOutput != null) {
-        final sessions = TmuxParser.parseSessions(sessionsOutput);
-        ref.read(tmuxProvider.notifier).updateSessions(sessions);
-
-        // 5. セッションを選択または新規作成
-        String sessionName;
-        if (sessions.isNotEmpty) {
-          sessionName = widget.sessionName ?? sessions.first.name;
-        } else {
-          // セッションがない場合は新規作成
-          sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
-          await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
-        }
-
-        ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
-
-        // 6. ウィンドウ・ペイン情報を取得
-        final windowsOutput = await sshClient?.exec(TmuxCommands.listWindows(sessionName));
-        if (windowsOutput != null) {
-          final windows = TmuxParser.parseWindows(windowsOutput);
-          if (windows.isNotEmpty) {
-            final activeWindow = windows.firstWhere((w) => w.active, orElse: () => windows.first);
-            setState(() {
-              _currentSession = sessionName;
-              _currentWindow = activeWindow.name;
-              _currentWindowIndex = activeWindow.index;
-              _currentPaneIndex = 0; // デフォルトで最初のペイン
-            });
-          }
-        }
-
-        // 7. 100msポーリング開始
-        _startPolling();
+      if (!mounted || _isDisposed) {
+        return;
       }
 
+      // 4. セッションツリー全体を取得
+      await _refreshSessionTree();
+      if (!mounted || _isDisposed) {
+        return;
+      }
+
+      final tmuxState = ref.read(tmuxProvider);
+      final sessions = tmuxState.sessions;
+
+      // 5. セッションを選択または新規作成
+      String sessionName;
+      if (sessions.isNotEmpty) {
+        sessionName = widget.sessionName ?? sessions.first.name;
+      } else {
+        // セッションがない場合は新規作成
+        final sshClient = ref.read(sshProvider.notifier).client;
+        sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
+        await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
+        if (!mounted || _isDisposed) return;
+        await _refreshSessionTree(); // ツリーを再取得
+        if (!mounted || _isDisposed) return;
+      }
+
+      // 6. アクティブセッション/ウィンドウ/ペインを設定
+      ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
+
+      // 7. 100msポーリング開始
+      _startPolling();
+
+      // 8. 5秒ごとにセッションツリーを更新
+      _startTreeRefresh();
+
+      if (!mounted) return;
       setState(() {
         _isConnecting = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isConnecting = false;
         _connectionError = e.toString();
       });
       _showErrorSnackBar(e.toString());
     }
+  }
+
+  /// セッションツリー全体を取得して更新
+  Future<void> _refreshSessionTree() async {
+    if (_isDisposed) {
+      return;
+    }
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null || !sshClient.isConnected) {
+      return;
+    }
+
+    try {
+      final cmd = TmuxCommands.listAllPanes();
+      final output = await sshClient.exec(cmd);
+      if (!mounted || _isDisposed) return;
+      ref.read(tmuxProvider.notifier).parseAndUpdateFullTree(output);
+    } catch (_) {
+      // ツリー更新エラーは静かに無視（次回ポーリングで再試行）
+    }
+  }
+
+  /// 5秒ごとにセッションツリーを更新
+  void _startTreeRefresh() {
+    _treeRefreshTimer?.cancel();
+    _treeRefreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _refreshSessionTree(),
+    );
   }
 
   /// 100msごとにcapture-paneを実行してターミナル内容を更新
@@ -137,7 +208,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// ペイン内容をポーリング取得
   Future<void> _pollPaneContent() async {
-    if (_isPolling) return; // 前回のポーリングがまだ実行中
+    if (_isPolling || _isDisposed) return; // 前回のポーリングがまだ実行中 or disposed
     _isPolling = true;
 
     try {
@@ -147,14 +218,22 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         return;
       }
 
-      // ペインIDを構築: session:window.pane
-      final paneId = '$_currentSession:$_currentWindowIndex.$_currentPaneIndex';
+      // tmux_providerからターゲットを取得
+      final target = ref.read(tmuxProvider.notifier).currentTarget;
+      if (target == null) {
+        _isPolling = false;
+        return;
+      }
+
       final startTime = DateTime.now();
       final output = await sshClient.exec(
-        TmuxCommands.capturePane(paneId, escapeSequences: true),
+        TmuxCommands.capturePane(target, escapeSequences: true),
         timeout: const Duration(milliseconds: 500),
       );
       final endTime = DateTime.now();
+
+      // アンマウント済みならスキップ
+      if (!mounted || _isDisposed) return;
 
       // レイテンシを更新
       setState(() {
@@ -170,7 +249,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       }
     } catch (e) {
       // ポーリングエラーは静かに無視（接続エラーは別途ハンドリング）
-      debugPrint('Poll error: $e');
     } finally {
       _isPolling = false;
     }
@@ -205,25 +283,38 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   @override
   void dispose() {
-    // ポーリングタイマーを停止
+    // まず_isDisposedをセットして非同期処理を停止
+    _isDisposed = true;
+    // Riverpodサブスクリプションをキャンセル
+    _sshSubscription?.close();
+    _sshSubscription = null;
+    _tmuxSubscription?.close();
+    _tmuxSubscription = null;
+    // タイマーを停止
     _pollTimer?.cancel();
+    _pollTimer = null;
+    _treeRefreshTimer?.cancel();
+    _treeRefreshTimer = null;
     _terminalController.dispose();
-    // SSH接続をクリーンアップ
-    ref.read(sshProvider.notifier).disconnect();
+    // SSH接続をクリーンアップ（refは使わずに直接クライアントを操作）
+    // dispose時にはref.readを避ける
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final sshState = ref.watch(sshProvider);
+    // ローカル状態を使用（ref.watchは使わない）
+    final sshState = _sshState;
+    final tmuxState = ref.read(tmuxProvider);
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: DesignColors.backgroundDark,
       body: Stack(
         children: [
           Column(
             children: [
-              _buildBreadcrumbHeader(),
+              _buildBreadcrumbHeader(tmuxState),
               Expanded(
                 child: Stack(
                   children: [
@@ -244,7 +335,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                     Positioned(
                       top: 8,
                       right: 8,
-                      child: _buildPaneIndicator(),
+                      child: _buildPaneIndicator(tmuxState),
                     ),
                   ],
                 ),
@@ -270,6 +361,57 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         ],
       ),
     );
+  }
+
+
+  /// セッションを選択
+  Future<void> _selectSession(String sessionName) async {
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null) return;
+
+    // tmux_providerでアクティブセッションを更新
+    ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
+
+    // ターミナル内容をクリアして再取得
+    _lastContent = '';
+  }
+
+  /// ウィンドウを選択
+  Future<void> _selectWindow(String sessionName, int windowIndex) async {
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null) return;
+
+    // セッションが異なる場合はセッションも切り替え
+    final currentSession = ref.read(tmuxProvider).activeSessionName;
+    if (currentSession != sessionName) {
+      ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
+    }
+
+    // tmux select-windowを実行
+    await sshClient.exec(TmuxCommands.selectWindow(sessionName, windowIndex));
+    if (!mounted || _isDisposed) return;
+
+    // tmux_providerでアクティブウィンドウを更新
+    ref.read(tmuxProvider.notifier).setActiveWindow(windowIndex);
+
+    // ターミナル内容をクリアして再取得
+    _lastContent = '';
+  }
+
+  /// ペインを選択
+  Future<void> _selectPane(String paneId) async {
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null) return;
+
+    // tmux select-paneを実行
+    await sshClient.exec(TmuxCommands.selectPane(paneId));
+    if (!mounted || _isDisposed) return;
+
+    // tmux_providerでアクティブペインを更新
+    ref.read(tmuxProvider.notifier).setActivePane(paneId);
+
+    // ターミナル内容をクリアして再取得
+    _lastContent = '';
   }
 
   /// エラーオーバーレイ
@@ -299,26 +441,25 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   /// 上部のパンくずナビゲーションヘッダー
-  Widget _buildBreadcrumbHeader() {
-    return Container(
-      height: 40,
-      decoration: BoxDecoration(
-        color: DesignColors.surfaceDark.withValues(alpha: 0.9),
-        border: const Border(
-          bottom: BorderSide(color: Color(0xFF2A2B36), width: 1),
+  Widget _buildBreadcrumbHeader(TmuxState tmuxState) {
+    final currentSession = tmuxState.activeSessionName ?? '';
+    final activeWindow = tmuxState.activeWindow;
+    final currentWindow = activeWindow?.name ?? '';
+    final activePane = tmuxState.activePane;
+
+    // SafeAreaを外側に配置してステータスバー分のスペースを確保
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: DesignColors.surfaceDark.withValues(alpha: 0.9),
+          border: const Border(
+            bottom: BorderSide(color: Color(0xFF2A2B36), width: 1),
+          ),
         ),
-      ),
-      child: SafeArea(
-        bottom: false,
         child: Row(
           children: [
-            const SizedBox(width: 8),
-            // Server icon
-            Icon(
-              Icons.dns,
-              size: 14,
-              color: DesignColors.primary.withValues(alpha: 0.8),
-            ),
             const SizedBox(width: 8),
             // Breadcrumb navigation
             Expanded(
@@ -326,13 +467,31 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    _buildBreadcrumbItem(_currentSession, isActive: true),
+                    // セッション名（タップで切り替え）
+                    _buildBreadcrumbItem(
+                      currentSession,
+                      icon: Icons.folder,
+                      isActive: true,
+                      onTap: () => _showSessionSelector(tmuxState),
+                    ),
                     _buildBreadcrumbSeparator(),
-                    _buildBreadcrumbItem(_currentWindow, isSelected: true),
-                    _buildBreadcrumbSeparator(),
-                    _buildBreadcrumbItem('htop', isActive: false),
-                    _buildBreadcrumbSeparator(),
-                    _buildBreadcrumbItem('nvim', isActive: false),
+                    // ウィンドウ名（タップで切り替え）
+                    _buildBreadcrumbItem(
+                      currentWindow,
+                      icon: Icons.tab,
+                      isSelected: true,
+                      onTap: () => _showWindowSelector(tmuxState),
+                    ),
+                    // ペインがあれば表示
+                    if (activePane != null) ...[
+                      _buildBreadcrumbSeparator(),
+                      _buildBreadcrumbItem(
+                        'Pane ${activePane.index}',
+                        icon: Icons.terminal,
+                        isActive: false,
+                        onTap: () => _showPaneSelector(tmuxState),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -381,13 +540,257 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     );
   }
 
-  Widget _buildBreadcrumbItem(String label, {bool isActive = false, bool isSelected = false}) {
+  /// セッション選択ダイアログを表示
+  void _showSessionSelector(TmuxState tmuxState) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: DesignColors.surfaceDark,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.6;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder, color: DesignColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Select Session',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: tmuxState.sessions.length,
+                    itemBuilder: (context, index) {
+                      final session = tmuxState.sessions[index];
+                      final isActive = session.name == tmuxState.activeSessionName;
+                      return ListTile(
+                        leading: Icon(
+                          Icons.folder,
+                          color: isActive ? DesignColors.primary : Colors.white60,
+                        ),
+                        title: Text(
+                          session.name,
+                          style: TextStyle(
+                            color: isActive ? DesignColors.primary : Colors.white,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${session.windowCount} windows',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                        trailing: isActive
+                            ? Icon(Icons.check, color: DesignColors.primary)
+                            : null,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectSession(session.name);
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// ウィンドウ選択ダイアログを表示
+  void _showWindowSelector(TmuxState tmuxState) {
+    final session = tmuxState.activeSession;
+    if (session == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: DesignColors.surfaceDark,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.6;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.tab, color: DesignColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Select Window',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: session.windows.length,
+                    itemBuilder: (context, index) {
+                      final window = session.windows[index];
+                      final isActive = window.index == tmuxState.activeWindowIndex;
+                      return ListTile(
+                        leading: Icon(
+                          Icons.tab,
+                          color: isActive ? DesignColors.primary : Colors.white60,
+                        ),
+                        title: Text(
+                          '${window.index}: ${window.name}',
+                          style: TextStyle(
+                            color: isActive ? DesignColors.primary : Colors.white,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${window.paneCount} panes',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                        trailing: isActive
+                            ? Icon(Icons.check, color: DesignColors.primary)
+                            : null,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectWindow(session.name, window.index);
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// ペイン選択ダイアログを表示
+  void _showPaneSelector(TmuxState tmuxState) {
+    final window = tmuxState.activeWindow;
+    if (window == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: DesignColors.surfaceDark,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.6;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.terminal, color: DesignColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Select Pane',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFF2A2B36)),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: window.panes.length,
+                    itemBuilder: (context, index) {
+                      final pane = window.panes[index];
+                      final isActive = pane.id == tmuxState.activePaneId;
+                      return ListTile(
+                        leading: Icon(
+                          Icons.terminal,
+                          color: isActive ? DesignColors.primary : Colors.white60,
+                        ),
+                        title: Text(
+                          'Pane ${pane.index}',
+                          style: TextStyle(
+                            color: isActive ? DesignColors.primary : Colors.white,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${pane.width}x${pane.height}',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                        trailing: isActive
+                            ? Icon(Icons.check, color: DesignColors.primary)
+                            : null,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectPane(pane.id);
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBreadcrumbItem(
+    String label, {
+    IconData? icon,
+    bool isActive = false,
+    bool isSelected = false,
+    VoidCallback? onTap,
+  }) {
     return GestureDetector(
-      onTap: () {},
+      onTap: onTap,
       child: Container(
-        padding: isSelected
-            ? const EdgeInsets.symmetric(horizontal: 8, vertical: 2)
-            : EdgeInsets.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: isSelected
             ? BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.05),
@@ -396,16 +799,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               )
             : null,
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (isSelected)
+            if (icon != null) ...[
               Icon(
-                Icons.article,
+                icon,
                 size: 12,
-                color: DesignColors.primary,
+                color: isActive
+                    ? DesignColors.primary
+                    : (isSelected ? Colors.white : Colors.white60),
               ),
-            if (isSelected) const SizedBox(width: 4),
+              const SizedBox(width: 4),
+            ],
             Text(
-              label,
+              label.isEmpty ? '...' : label,
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 11,
                 fontWeight: isActive || isSelected ? FontWeight.w700 : FontWeight.w400,
@@ -414,6 +821,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                     : (isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5)),
               ),
             ),
+            if (onTap != null) ...[
+              const SizedBox(width: 2),
+              Icon(
+                Icons.arrow_drop_down,
+                size: 14,
+                color: isActive
+                    ? DesignColors.primary.withValues(alpha: 0.7)
+                    : Colors.white38,
+              ),
+            ],
           ],
         ),
       ),
@@ -435,29 +852,75 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   /// 右上のペインインジケーター
-  Widget _buildPaneIndicator() {
-    return Opacity(
-      opacity: 0.3,
-      child: Column(
-        children: [
-          Container(
-            width: 24,
-            height: 32,
-            decoration: BoxDecoration(
-              border: Border.all(color: DesignColors.primary),
-              color: DesignColors.primary.withValues(alpha: 0.2),
-            ),
+  Widget _buildPaneIndicator(TmuxState tmuxState) {
+    final window = tmuxState.activeWindow;
+    final panes = window?.panes ?? [];
+    final activePaneId = tmuxState.activePaneId;
+
+    if (panes.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    // 簡易的なペインレイアウト表示（最大4ペイン）
+    return GestureDetector(
+      onTap: () => _showPaneSelector(tmuxState),
+      child: Opacity(
+        opacity: 0.4,
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 上段
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (int i = 0; i < panes.length.clamp(0, 2); i++)
+                    Container(
+                      width: 18,
+                      height: 14,
+                      margin: EdgeInsets.only(left: i > 0 ? 2 : 0),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: panes[i].id == activePaneId
+                              ? DesignColors.primary
+                              : Colors.white30,
+                        ),
+                        color: panes[i].id == activePaneId
+                            ? DesignColors.primary.withValues(alpha: 0.3)
+                            : Colors.black26,
+                      ),
+                    ),
+                ],
+              ),
+              // 下段（3ペイン以上の場合）
+              if (panes.length > 2) ...[
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (int i = 2; i < panes.length.clamp(0, 4); i++)
+                      Container(
+                        width: 18,
+                        height: 14,
+                        margin: EdgeInsets.only(left: i > 2 ? 2 : 0),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: panes[i].id == activePaneId
+                                ? DesignColors.primary
+                                : Colors.white30,
+                          ),
+                          color: panes[i].id == activePaneId
+                              ? DesignColors.primary.withValues(alpha: 0.3)
+                              : Colors.black26,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 2),
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-              color: Colors.black.withValues(alpha: 0.4),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -498,11 +961,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     final sshClient = ref.read(sshProvider.notifier).client;
     if (sshClient == null || !sshClient.isConnected) return;
 
+    final target = ref.read(tmuxProvider.notifier).currentTarget;
+    if (target == null) return;
+
     try {
-      final paneId = '$_currentSession:$_currentWindowIndex.$_currentPaneIndex';
-      await sshClient.exec(TmuxCommands.sendKeys(paneId, key, literal: literal));
-    } catch (e) {
-      debugPrint('Send key error: $e');
+      await sshClient.exec(TmuxCommands.sendKeys(target, key, literal: literal));
+    } catch (_) {
+      // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
   }
 
@@ -511,12 +976,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     final sshClient = ref.read(sshProvider.notifier).client;
     if (sshClient == null || !sshClient.isConnected) return;
 
+    final target = ref.read(tmuxProvider.notifier).currentTarget;
+    if (target == null) return;
+
     try {
-      final paneId = '$_currentSession:$_currentWindowIndex.$_currentPaneIndex';
       // 特殊キーはリテラルではなくtmux形式で送信
-      await sshClient.exec(TmuxCommands.sendKeys(paneId, tmuxKey, literal: false));
-    } catch (e) {
-      debugPrint('Send special key error: $e');
+      await sshClient.exec(TmuxCommands.sendKeys(target, tmuxKey, literal: false));
+    } catch (_) {
+      // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
   }
 

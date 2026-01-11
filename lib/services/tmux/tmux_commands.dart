@@ -3,8 +3,8 @@
 /// tmuxコマンドを生成するユーティリティクラス。
 /// TmuxParserと対応するフォーマット文字列を使用。
 class TmuxCommands {
-  /// デフォルトの区切り文字（タブ）
-  static const String delimiter = '\t';
+  /// デフォルトの区切り文字（SSH経由でタブが変換されるため|||を使用）
+  static const String delimiter = '|||';
 
   // ===== セッション =====
 

@@ -21,6 +21,7 @@ class KeysScreen extends ConsumerWidget {
       ),
       body: _buildBody(context, ref, keysState),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'fab_add_ssh_key',
         onPressed: () {
           _showAddKeyOptions(context);
         },
