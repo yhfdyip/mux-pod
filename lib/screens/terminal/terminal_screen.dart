@@ -19,6 +19,7 @@ import '../../services/tmux/tmux_parser.dart';
 import '../../theme/design_colors.dart';
 import '../../widgets/special_keys_bar.dart';
 import '../../providers/terminal_display_provider.dart';
+import '../settings/settings_screen.dart';
 import 'widgets/ansi_text_view.dart';
 
 /// ターミナル画面（HTMLデザイン仕様準拠）
@@ -1155,9 +1156,15 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// ターミナルメニューを表示
   void _showTerminalMenu() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final menuBgColor = isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final mutedTextColor = isDark ? Colors.white38 : Colors.black38;
+    final inactiveIconColor = isDark ? Colors.white60 : Colors.black45;
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: DesignColors.surfaceDark,
+      backgroundColor: menuBgColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -1177,14 +1184,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       style: GoogleFonts.spaceGrotesk(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                        color: textColor,
                       ),
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1, color: Color(0xFF2A2B36)),
-              // コピペモード切り替え
+              Divider(height: 1, color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300),
+              // モード切り替え（Normal / Scroll & Select）
               ListTile(
                 leading: Icon(
                   _terminalMode == TerminalMode.copyPaste
@@ -1192,16 +1199,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       : Icons.keyboard,
                   color: _terminalMode == TerminalMode.copyPaste
                       ? DesignColors.primary
-                      : Colors.white60,
+                      : inactiveIconColor,
                 ),
                 title: Text(
                   _terminalMode == TerminalMode.copyPaste
-                      ? 'Copy/Paste Mode (Active)'
+                      ? 'Scroll & Select Mode'
                       : 'Normal Mode',
                   style: TextStyle(
                     color: _terminalMode == TerminalMode.copyPaste
                         ? DesignColors.primary
-                        : Colors.white,
+                        : textColor,
                     fontWeight: _terminalMode == TerminalMode.copyPaste
                         ? FontWeight.bold
                         : FontWeight.normal,
@@ -1211,7 +1218,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                   _terminalMode == TerminalMode.copyPaste
                       ? 'Tap to return to normal mode'
                       : 'Tap to enable text selection',
-                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  style: TextStyle(color: mutedTextColor, fontSize: 12),
                 ),
                 trailing: Switch(
                   value: _terminalMode == TerminalMode.copyPaste,
@@ -1238,19 +1245,19 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               ListTile(
                 leading: Icon(
                   Icons.zoom_out_map,
-                  color: _zoomScale != 1.0 ? DesignColors.warning : Colors.white60,
+                  color: _zoomScale != 1.0 ? DesignColors.warning : inactiveIconColor,
                 ),
                 title: Text(
                   'Reset Zoom',
                   style: TextStyle(
-                    color: _zoomScale != 1.0 ? Colors.white : Colors.white38,
+                    color: _zoomScale != 1.0 ? textColor : mutedTextColor,
                   ),
                 ),
                 subtitle: Text(
                   _zoomScale != 1.0
                       ? 'Current: ${(_zoomScale * 100).toStringAsFixed(0)}%'
                       : 'Pinch to zoom in/out',
-                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  style: TextStyle(color: mutedTextColor, fontSize: 12),
                 ),
                 enabled: _zoomScale != 1.0,
                 onTap: _zoomScale != 1.0
@@ -1263,12 +1270,116 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                       }
                     : null,
               ),
+              Divider(height: 1, color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300),
+              // 設定画面へ
+              ListTile(
+                leading: Icon(
+                  Icons.settings,
+                  color: inactiveIconColor,
+                ),
+                title: Text(
+                  'Settings',
+                  style: TextStyle(color: textColor),
+                ),
+                subtitle: Text(
+                  'Font, theme, and other options',
+                  style: TextStyle(color: mutedTextColor, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsScreen(),
+                    ),
+                  );
+                },
+              ),
+              Divider(height: 1, color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300),
+              // 切断ボタン
+              ListTile(
+                leading: Icon(
+                  Icons.power_settings_new,
+                  color: DesignColors.error,
+                ),
+                title: Text(
+                  'Disconnect',
+                  style: TextStyle(
+                    color: DesignColors.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  'Close SSH connection',
+                  style: TextStyle(color: mutedTextColor, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showDisconnectConfirmation();
+                },
+              ),
               const SizedBox(height: 16),
             ],
           ),
         );
       },
     );
+  }
+
+  /// 切断確認ダイアログを表示
+  void _showDisconnectConfirmation() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
+          title: Text(
+            'Disconnect?',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          ),
+          content: Text(
+            'Are you sure you want to disconnect from the server?',
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: isDark ? Colors.white60 : Colors.black54),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(context); // ダイアログを閉じる
+                await _disconnect();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: DesignColors.error,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Disconnect'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// SSH接続を切断して前の画面に戻る
+  Future<void> _disconnect() async {
+    // ポーリングを停止
+    _pollTimer?.cancel();
+    _treeRefreshTimer?.cancel();
+
+    // SSH切断
+    await ref.read(sshProvider.notifier).disconnect();
+
+    // 前の画面に戻る
+    if (mounted) {
+      Navigator.pop(context);
+    }
   }
 
   /// 接続状態インジケーター（レイテンシまたは再接続状態を表示）
