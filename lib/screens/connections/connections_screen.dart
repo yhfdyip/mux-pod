@@ -45,30 +45,14 @@ class ConnectionsScreen extends ConsumerWidget {
       surfaceTintColor: Colors.transparent,
       flexibleSpace: FlexibleSpaceBar(
         titlePadding: const EdgeInsets.only(left: 24, bottom: 16),
-        title: Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Connections',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'GATEWAY_STATUS: ONLINE',
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 10,
-                fontWeight: FontWeight.w400,
-                color: DesignColors.textMuted,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+        title: Text(
+          'Connections',
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+            letterSpacing: -0.5,
+          ),
         ),
       ),
       actions: [
@@ -88,17 +72,14 @@ class ConnectionsScreen extends ConsumerWidget {
   }
 
   Widget _buildFAB(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 72),
-      child: FloatingActionButton.extended(
-        heroTag: 'fab_add_connection',
-        onPressed: () => _addConnection(context, ref),
-        icon: const Icon(Icons.add, size: 20),
-        label: const Text('Add New Connection'),
-        elevation: 0,
-        backgroundColor: DesignColors.primary,
-        foregroundColor: Colors.black,
-      ),
+    return FloatingActionButton.extended(
+      heroTag: 'fab_add_connection',
+      onPressed: () => _addConnection(context, ref),
+      icon: const Icon(Icons.add, size: 20),
+      label: const Text('Add New Connection'),
+      elevation: 0,
+      backgroundColor: DesignColors.primary,
+      foregroundColor: Colors.black,
     );
   }
 
