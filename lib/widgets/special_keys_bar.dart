@@ -45,6 +45,12 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
   final TextEditingController _directInputController = TextEditingController();
   final FocusNode _directInputFocusNode = FocusNode();
 
+  /// 前回送信済みのテキスト（IME確定検出用）
+  String _lastSentText = '';
+
+  /// 現在IME変換中かどうか
+  bool _isComposing = false;
+
   @override
   void initState() {
     super.initState();
@@ -59,15 +65,76 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
     super.dispose();
   }
 
-  /// DirectInput: 入力した文字を即座に送信
+  /// DirectInput: IME変換確定時のみ送信
   void _onDirectInputChanged() {
     final text = _directInputController.text;
-    if (text.isNotEmpty) {
-      // 最後の文字を送信
-      widget.onKeyPressed(text);
-      // 入力をクリア
-      _directInputController.clear();
+    final value = _directInputController.value;
+
+    // composingが空でない = IME変換中
+    _isComposing = value.composing.isValid && !value.composing.isCollapsed;
+
+    if (_isComposing) {
+      // 変換中は送信しない
+      return;
     }
+
+    // 新しく追加された文字のみを送信
+    if (text.length > _lastSentText.length) {
+      final newText = text.substring(_lastSentText.length);
+      widget.onKeyPressed(newText);
+    }
+    _lastSentText = text;
+
+    // テキストが長くなりすぎたらクリア（100文字を超えたら）
+    if (text.length > 100) {
+      _directInputController.clear();
+      _lastSentText = '';
+    }
+  }
+
+  /// DirectInput: Enterキー送信
+  void _sendDirectEnter() {
+    if (widget.hapticFeedback) {
+      HapticFeedback.lightImpact();
+    }
+    widget.onSpecialKeyPressed('Enter');
+  }
+
+  /// DirectInput: Backspaceキー送信
+  void _sendDirectBackspace() {
+    if (widget.hapticFeedback) {
+      HapticFeedback.lightImpact();
+    }
+    widget.onSpecialKeyPressed('BSpace');
+  }
+
+  /// キーイベントハンドラ（Enter/Backspace等をキャプチャ）
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    // IME変換中はキーイベントを処理しない
+    if (_isComposing) {
+      return KeyEventResult.ignored;
+    }
+
+    // Enterキー
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      _sendDirectEnter();
+      return KeyEventResult.handled;
+    }
+
+    // Backspaceキー（テキストが空の場合のみ送信）
+    if (event.logicalKey == LogicalKeyboardKey.backspace) {
+      if (_directInputController.text.isEmpty) {
+        _sendDirectBackspace();
+        return KeyEventResult.handled;
+      }
+    }
+
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -88,6 +155,7 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
           children: [
             _buildModifierKeysRow(),
             _buildArrowKeysRow(),
+            if (widget.directInputEnabled) _buildDirectInputRow(),
             const SizedBox(height: 4),
           ],
         ),
@@ -242,13 +310,79 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
           // DirectInputモードトグルボタン
           _buildDirectInputToggle(),
           const SizedBox(width: 4),
-          // DirectInputモードに応じて表示を切り替え
-          Expanded(
-            child: widget.directInputEnabled
-                ? _buildDirectInputField()
-                : _buildInputButton(),
+          // DirectInputモードが無効の場合のみInputボタンを表示
+          if (!widget.directInputEnabled)
+            Expanded(child: _buildInputButton()),
+        ],
+      ),
+    );
+  }
+
+  /// DirectInput専用行（入力フィールド + Enter/Backspaceボタン）
+  Widget _buildDirectInputRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          // Backspaceボタン
+          _buildDirectKeyButton(
+            icon: Icons.backspace_outlined,
+            label: 'BS',
+            onTap: _sendDirectBackspace,
+            color: DesignColors.warning,
+          ),
+          const SizedBox(width: 4),
+          // 入力フィールド（横幅いっぱいに）
+          Expanded(child: _buildDirectInputField()),
+          const SizedBox(width: 4),
+          // Enterボタン
+          _buildDirectKeyButton(
+            icon: Icons.keyboard_return,
+            label: 'RET',
+            onTap: _sendDirectEnter,
+            color: DesignColors.primary,
           ),
         ],
+      ),
+    );
+  }
+
+  /// DirectInput用のキーボタン（Enter/Backspace）
+  Widget _buildDirectKeyButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTapDown: (_) {
+        if (widget.hapticFeedback) {
+          HapticFeedback.lightImpact();
+        }
+      },
+      onTap: onTap,
+      child: Container(
+        width: 48,
+        height: 40,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: color),
+            Text(
+              label,
+              style: GoogleFonts.jetBrainsMono(
+                fontSize: 8,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -290,53 +424,80 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
 
   /// DirectInput用テキストフィールド（リアルタイム送信）
   Widget _buildDirectInputField() {
-    return Container(
-      height: 36,
-      decoration: BoxDecoration(
-        color: DesignColors.success.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: DesignColors.success.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _directInputController,
-              focusNode: _directInputFocusNode,
-              autofocus: true,
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 12,
-                color: Colors.white,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Focus(
+      onKeyEvent: _handleKeyEvent,
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: DesignColors.success.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: DesignColors.success.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            // LIVEインジケーター（左側に配置）
+            Container(
+              margin: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: DesignColors.success.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(4),
               ),
-              decoration: InputDecoration(
-                hintText: 'Direct input...',
-                hintStyle: GoogleFonts.jetBrainsMono(
-                  fontSize: 12,
-                  color: DesignColors.success.withValues(alpha: 0.5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: DesignColors.success,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: DesignColors.success.withValues(alpha: 0.5),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'LIVE',
+                    style: GoogleFonts.jetBrainsMono(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: DesignColors.success,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 入力フィールド
+            Expanded(
+              child: TextField(
+                controller: _directInputController,
+                focusNode: _directInputFocusNode,
+                autofocus: true,
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 14,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                isDense: true,
+                decoration: InputDecoration(
+                  hintText: 'Type here...',
+                  hintStyle: GoogleFonts.jetBrainsMono(
+                    fontSize: 14,
+                    color: DesignColors.success.withValues(alpha: 0.5),
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                  isDense: true,
+                ),
               ),
             ),
-          ),
-          Container(
-            margin: const EdgeInsets.only(right: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: DesignColors.success.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              'LIVE',
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 8,
-                fontWeight: FontWeight.w700,
-                color: DesignColors.success,
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
