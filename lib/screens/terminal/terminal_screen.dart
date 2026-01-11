@@ -13,7 +13,7 @@ import '../../services/ssh/ssh_client.dart' show SshConnectOptions;
 import '../../services/tmux/tmux_commands.dart';
 import '../../theme/design_colors.dart';
 import '../../widgets/special_keys_bar.dart';
-import 'widgets/session_drawer.dart';
+// session_drawer.dart は使用しない（デザイン仕様外）
 
 /// ターミナル画面（HTMLデザイン仕様準拠）
 class TerminalScreen extends ConsumerStatefulWidget {
@@ -70,10 +70,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// Providerのリスナーを設定
   void _setupListeners() {
+    debugPrint('[DEBUG] _setupListeners: setting up listeners');
     // SSH状態の変化を監視
     _sshSubscription = ref.listenManual<SshState>(
       sshProvider,
       (previous, next) {
+        debugPrint('[DEBUG] sshProvider changed: ${previous?.connectionState} -> ${next.connectionState}');
         if (!mounted || _isDisposed) return;
         setState(() {
           _sshState = next;
@@ -86,6 +88,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _tmuxSubscription = ref.listenManual<TmuxState>(
       tmuxProvider,
       (previous, next) {
+        debugPrint('[DEBUG] tmuxProvider changed: sessions=${next.sessions.length}, active=${next.activeSessionName}');
         if (!mounted || _isDisposed) return;
         setState(() {
           // tmuxStateはbuild内で直接読み取る
@@ -93,11 +96,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       },
       fireImmediately: true,
     );
+    debugPrint('[DEBUG] _setupListeners: done');
   }
 
   /// SSH接続してtmuxセッションをセットアップ
   Future<void> _connectAndSetup() async {
-    if (!mounted) return;
+    debugPrint('[DEBUG] _connectAndSetup: started');
+    if (!mounted) {
+      debugPrint('[DEBUG] _connectAndSetup: not mounted, returning');
+      return;
+    }
     setState(() {
       _isConnecting = true;
       _connectionError = null;
@@ -106,32 +114,54 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       // 1. 接続情報を取得
       final connection = ref.read(connectionsProvider.notifier).getById(widget.connectionId);
+      debugPrint('[DEBUG] _connectAndSetup: connection=$connection');
       if (connection == null) {
         throw Exception('Connection not found');
       }
 
       // 2. 認証情報を取得
       final options = await _getAuthOptions(connection);
-      if (!mounted || _isDisposed) return;
+      debugPrint('[DEBUG] _connectAndSetup: auth options obtained');
+      if (!mounted || _isDisposed) {
+        debugPrint('[DEBUG] _connectAndSetup: unmounted after getAuthOptions');
+        return;
+      }
 
       // 3. SSH接続（シェルは起動しない - execのみ使用）
       final sshNotifier = ref.read(sshProvider.notifier);
       await sshNotifier.connectWithoutShell(connection, options);
-      if (!mounted || _isDisposed) return;
+      debugPrint('[DEBUG] _connectAndSetup: SSH connected');
+      if (!mounted || _isDisposed) {
+        debugPrint('[DEBUG] _connectAndSetup: unmounted after SSH connect');
+        return;
+      }
 
       // 4. セッションツリー全体を取得
       await _refreshSessionTree();
-      if (!mounted || _isDisposed) return;
+      debugPrint('[DEBUG] _connectAndSetup: session tree refreshed');
+      if (!mounted || _isDisposed) {
+        debugPrint('[DEBUG] _connectAndSetup: unmounted after refreshSessionTree');
+        return;
+      }
 
       final tmuxState = ref.read(tmuxProvider);
       final sessions = tmuxState.sessions;
+      debugPrint('[DEBUG] _connectAndSetup: sessions.length=${sessions.length}');
+      for (final s in sessions) {
+        debugPrint('[DEBUG]   session: ${s.name}, windows: ${s.windows.length}');
+        for (final w in s.windows) {
+          debugPrint('[DEBUG]     window: ${w.index}:${w.name}, panes: ${w.panes.length}');
+        }
+      }
 
       // 5. セッションを選択または新規作成
       String sessionName;
       if (sessions.isNotEmpty) {
         sessionName = widget.sessionName ?? sessions.first.name;
+        debugPrint('[DEBUG] _connectAndSetup: using existing session=$sessionName');
       } else {
         // セッションがない場合は新規作成
+        debugPrint('[DEBUG] _connectAndSetup: no sessions, creating new one');
         final sshClient = ref.read(sshProvider.notifier).client;
         sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
         await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
@@ -142,9 +172,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
       // 6. アクティブセッション/ウィンドウ/ペインを設定
       ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
+      final currentTarget = ref.read(tmuxProvider.notifier).currentTarget;
+      debugPrint('[DEBUG] _connectAndSetup: setActiveSession done, currentTarget=$currentTarget');
 
       // 7. 100msポーリング開始
       _startPolling();
+      debugPrint('[DEBUG] _connectAndSetup: polling started');
 
       // 8. 5秒ごとにセッションツリーを更新
       _startTreeRefresh();
@@ -153,7 +186,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       setState(() {
         _isConnecting = false;
       });
-    } catch (e) {
+      debugPrint('[DEBUG] _connectAndSetup: completed successfully');
+    } catch (e, stack) {
+      debugPrint('[DEBUG] _connectAndSetup: error=$e');
+      debugPrint('[DEBUG] $stack');
       if (!mounted) return;
       setState(() {
         _isConnecting = false;
@@ -165,16 +201,28 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// セッションツリー全体を取得して更新
   Future<void> _refreshSessionTree() async {
-    if (_isDisposed) return;
+    debugPrint('[DEBUG] _refreshSessionTree: started');
+    if (_isDisposed) {
+      debugPrint('[DEBUG] _refreshSessionTree: disposed, returning');
+      return;
+    }
     final sshClient = ref.read(sshProvider.notifier).client;
-    if (sshClient == null || !sshClient.isConnected) return;
+    if (sshClient == null || !sshClient.isConnected) {
+      debugPrint('[DEBUG] _refreshSessionTree: sshClient null or not connected');
+      return;
+    }
 
     try {
-      final output = await sshClient.exec(TmuxCommands.listAllPanes());
+      final cmd = TmuxCommands.listAllPanes();
+      debugPrint('[DEBUG] _refreshSessionTree: executing cmd=$cmd');
+      final output = await sshClient.exec(cmd);
+      debugPrint('[DEBUG] _refreshSessionTree: output length=${output.length}');
+      debugPrint('[DEBUG] _refreshSessionTree: output=\n$output');
       if (!mounted || _isDisposed) return;
       ref.read(tmuxProvider.notifier).parseAndUpdateFullTree(output);
+      debugPrint('[DEBUG] _refreshSessionTree: parseAndUpdateFullTree done');
     } catch (e) {
-      debugPrint('Failed to refresh session tree: $e');
+      debugPrint('[DEBUG] _refreshSessionTree error: $e');
     }
   }
 
@@ -201,6 +249,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       final sshClient = ref.read(sshProvider.notifier).client;
       if (sshClient == null || !sshClient.isConnected) {
+        debugPrint('[DEBUG] _pollPaneContent: sshClient null or not connected');
         _isPolling = false;
         return;
       }
@@ -208,6 +257,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       // tmux_providerからターゲットを取得
       final target = ref.read(tmuxProvider.notifier).currentTarget;
       if (target == null) {
+        debugPrint('[DEBUG] _pollPaneContent: target is null');
+        final state = ref.read(tmuxProvider);
+        debugPrint('[DEBUG]   activeSessionName=${state.activeSessionName}');
+        debugPrint('[DEBUG]   activeWindowIndex=${state.activeWindowIndex}');
+        debugPrint('[DEBUG]   activePaneIndex=${state.activePaneIndex}');
         _isPolling = false;
         return;
       }
@@ -233,10 +287,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         // ターミナルをクリアして新しい内容を書き込む
         _terminal.write('\x1b[2J\x1b[H'); // 画面クリア + カーソルホーム
         _terminal.write(output);
+        debugPrint('[DEBUG] _pollPaneContent: updated content, length=${output.length}');
       }
     } catch (e) {
       // ポーリングエラーは静かに無視（接続エラーは別途ハンドリング）
-      debugPrint('Poll error: $e');
+      debugPrint('[DEBUG] _pollPaneContent error: $e');
     } finally {
       _isPolling = false;
     }
@@ -298,8 +353,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: DesignColors.backgroundDark,
-      drawer: _buildSessionDrawer(tmuxState),
-      drawerEdgeDragWidth: 40,
       body: Stack(
         children: [
           Column(
@@ -353,84 +406,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     );
   }
 
-  /// セッションドロワーを構築
-  Widget _buildSessionDrawer(TmuxState tmuxState) {
-    final sessions = tmuxState.sessions.map((session) {
-      return SessionItem(
-        name: session.name,
-        windows: session.windows.map((window) {
-          return WindowItem(
-            index: window.index,
-            name: window.name,
-            panes: window.panes.map((pane) {
-              return PaneItem(
-                index: pane.index,
-                id: pane.id,
-                width: pane.width,
-                height: pane.height,
-              );
-            }).toList(),
-          );
-        }).toList(),
-      );
-    }).toList();
-
-    return Drawer(
-      backgroundColor: DesignColors.surfaceDark,
-      child: SafeArea(
-        child: Column(
-          children: [
-            // ドロワーヘッダー
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(color: Color(0xFF2A2B36)),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.account_tree,
-                    color: DesignColors.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Sessions',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: _refreshSessionTree,
-                    icon: const Icon(Icons.refresh, size: 20),
-                    color: Colors.white60,
-                    tooltip: 'Refresh',
-                  ),
-                ],
-              ),
-            ),
-            // セッションツリー
-            Expanded(
-              child: SessionDrawer(
-                sessions: sessions,
-                activeSessionName: tmuxState.activeSessionName,
-                activeWindowIndex: tmuxState.activeWindowIndex,
-                activePaneId: tmuxState.activePaneId,
-                onSessionTap: (sessionName) => _selectSession(sessionName),
-                onWindowTap: (sessionName, windowIndex) =>
-                    _selectWindow(sessionName, windowIndex),
-                onPaneTap: (paneId) => _selectPane(paneId),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// セッションを選択
   Future<void> _selectSession(String sessionName) async {
@@ -439,9 +414,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     // tmux_providerでアクティブセッションを更新
     ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
-
-    // ドロワーを閉じる
-    _scaffoldKey.currentState?.closeDrawer();
 
     // ターミナル内容をクリアして再取得
     _lastContent = '';
@@ -465,9 +437,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     // tmux_providerでアクティブウィンドウを更新
     ref.read(tmuxProvider.notifier).setActiveWindow(windowIndex);
 
-    // ドロワーを閉じる
-    _scaffoldKey.currentState?.closeDrawer();
-
     // ターミナル内容をクリアして再取得
     _lastContent = '';
   }
@@ -483,9 +452,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     // tmux_providerでアクティブペインを更新
     ref.read(tmuxProvider.notifier).setActivePane(paneId);
-
-    // ドロワーを閉じる
-    _scaffoldKey.currentState?.closeDrawer();
 
     // ターミナル内容をクリアして再取得
     _lastContent = '';
@@ -524,27 +490,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     final currentWindow = activeWindow?.name ?? '';
     final activePane = tmuxState.activePane;
 
-    return Container(
-      height: 40,
-      decoration: BoxDecoration(
-        color: DesignColors.surfaceDark.withValues(alpha: 0.9),
-        border: const Border(
-          bottom: BorderSide(color: Color(0xFF2A2B36), width: 1),
+    // SafeAreaを外側に配置してステータスバー分のスペースを確保
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: DesignColors.surfaceDark.withValues(alpha: 0.9),
+          border: const Border(
+            bottom: BorderSide(color: Color(0xFF2A2B36), width: 1),
+          ),
         ),
-      ),
-      child: SafeArea(
-        bottom: false,
         child: Row(
           children: [
-            // ハンバーガーメニュー
-            IconButton(
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-              icon: const Icon(Icons.menu, size: 18),
-              color: Colors.white70,
-              padding: const EdgeInsets.all(8),
-              constraints: const BoxConstraints(),
-              tooltip: 'Open session drawer',
-            ),
+            const SizedBox(width: 8),
             // Breadcrumb navigation
             Expanded(
               child: SingleChildScrollView(
