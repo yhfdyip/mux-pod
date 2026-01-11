@@ -720,8 +720,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   /// 一番下までスクロール
+  ///
+  /// レイアウト完了後に確実にスクロールするため、
+  /// 少し遅延を入れてからスクロールを実行する
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // レイアウトが完了するまで少し待つ
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted || _isDisposed) return;
       if (_terminalScrollController.hasClients) {
         _terminalScrollController.animateTo(
           _terminalScrollController.position.maxScrollExtent,
