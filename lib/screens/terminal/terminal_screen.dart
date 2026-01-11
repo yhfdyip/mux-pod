@@ -928,9 +928,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   void _showInputDialog() {
-    final controller = TextEditingController();
-    final focusNode = FocusNode();
-
     showModalBottomSheet(
       context: context,
       backgroundColor: DesignColors.surfaceDark,
@@ -939,8 +936,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => _InputDialogContent(
-        controller: controller,
-        focusNode: focusNode,
         onSend: (value) async {
           await _sendMultilineText(value);
           if (context.mounted) Navigator.pop(context);
@@ -949,7 +944,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     );
   }
 
-  /// 複数行テキストを送信（各行ごとにテキスト+Enterを送信）
+  /// 複数行テキストを送信（行ごとにテキスト+Enterを送信）
   Future<void> _sendMultilineText(String text) async {
     final lines = text.split('\n');
     for (int i = 0; i < lines.length; i++) {
@@ -1190,13 +1185,9 @@ class _PaneLayoutPainter extends CustomPainter {
 
 /// 入力ダイアログのコンテンツ（複数行対応、Shift+Enterで改行）
 class _InputDialogContent extends StatefulWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
   final Future<void> Function(String value) onSend;
 
   const _InputDialogContent({
-    required this.controller,
-    required this.focusNode,
     required this.onSend,
   });
 
@@ -1205,23 +1196,28 @@ class _InputDialogContent extends StatefulWidget {
 }
 
 class _InputDialogContentState extends State<_InputDialogContent> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
   bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
+    _controller = TextEditingController();
+    _focusNode = FocusNode();
     // キーイベントをハンドルするためにonKeyEventを設定
-    widget.focusNode.onKeyEvent = _handleKeyEvent;
+    _focusNode.onKeyEvent = _handleKeyEvent;
     // 自動フォーカス
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.focusNode.requestFocus();
+      _focusNode.requestFocus();
     });
   }
 
   @override
   void dispose() {
-    widget.focusNode.onKeyEvent = null;
-    widget.focusNode.dispose();
+    _focusNode.onKeyEvent = null;
+    _focusNode.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -1244,10 +1240,10 @@ class _InputDialogContentState extends State<_InputDialogContent> {
 
   /// 現在のカーソル位置に改行を挿入
   void _insertNewline() {
-    final text = widget.controller.text;
-    final selection = widget.controller.selection;
+    final text = _controller.text;
+    final selection = _controller.selection;
     final newText = text.replaceRange(selection.start, selection.end, '\n');
-    widget.controller.value = TextEditingValue(
+    _controller.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: selection.start + 1),
     );
@@ -1257,7 +1253,7 @@ class _InputDialogContentState extends State<_InputDialogContent> {
     if (_isSending) return;
     setState(() => _isSending = true);
     try {
-      await widget.onSend(widget.controller.text);
+      await widget.onSend(_controller.text);
     } finally {
       if (mounted) {
         setState(() => _isSending = false);
@@ -1307,8 +1303,8 @@ class _InputDialogContentState extends State<_InputDialogContent> {
           ),
           const SizedBox(height: 16),
           TextField(
-            controller: widget.controller,
-            focusNode: widget.focusNode,
+            controller: _controller,
+            focusNode: _focusNode,
             maxLines: null,
             minLines: 1,
             keyboardType: TextInputType.multiline,
