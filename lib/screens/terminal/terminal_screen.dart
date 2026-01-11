@@ -48,6 +48,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   Timer? _treeRefreshTimer;
   String _lastContent = '';
   bool _isPolling = false;
+  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -58,6 +59,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// SSH接続してtmuxセッションをセットアップ
   Future<void> _connectAndSetup() async {
+    if (!mounted) return;
     setState(() {
       _isConnecting = true;
       _connectionError = null;
@@ -72,13 +74,16 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
       // 2. 認証情報を取得
       final options = await _getAuthOptions(connection);
+      if (!mounted || _isDisposed) return;
 
       // 3. SSH接続（シェルは起動しない - execのみ使用）
       final sshNotifier = ref.read(sshProvider.notifier);
       await sshNotifier.connectWithoutShell(connection, options);
+      if (!mounted || _isDisposed) return;
 
       // 4. セッションツリー全体を取得
       await _refreshSessionTree();
+      if (!mounted || _isDisposed) return;
 
       final tmuxState = ref.read(tmuxProvider);
       final sessions = tmuxState.sessions;
@@ -92,7 +97,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         final sshClient = ref.read(sshProvider.notifier).client;
         sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
         await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
+        if (!mounted || _isDisposed) return;
         await _refreshSessionTree(); // ツリーを再取得
+        if (!mounted || _isDisposed) return;
       }
 
       // 6. アクティブセッション/ウィンドウ/ペインを設定
@@ -104,10 +111,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       // 8. 5秒ごとにセッションツリーを更新
       _startTreeRefresh();
 
+      if (!mounted) return;
       setState(() {
         _isConnecting = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isConnecting = false;
         _connectionError = e.toString();
@@ -118,11 +127,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// セッションツリー全体を取得して更新
   Future<void> _refreshSessionTree() async {
+    if (_isDisposed) return;
     final sshClient = ref.read(sshProvider.notifier).client;
     if (sshClient == null || !sshClient.isConnected) return;
 
     try {
       final output = await sshClient.exec(TmuxCommands.listAllPanes());
+      if (!mounted || _isDisposed) return;
       ref.read(tmuxProvider.notifier).parseAndUpdateFullTree(output);
     } catch (e) {
       debugPrint('Failed to refresh session tree: $e');
@@ -146,7 +157,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// ペイン内容をポーリング取得
   Future<void> _pollPaneContent() async {
-    if (_isPolling) return; // 前回のポーリングがまだ実行中
+    if (_isPolling || _isDisposed) return; // 前回のポーリングがまだ実行中 or disposed
     _isPolling = true;
 
     try {
@@ -169,6 +180,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         timeout: const Duration(milliseconds: 500),
       );
       final endTime = DateTime.now();
+
+      // アンマウント済みならスキップ
+      if (!mounted || _isDisposed) return;
 
       // レイテンシを更新
       setState(() {
@@ -219,9 +233,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   @override
   void dispose() {
+    // まず_isDisposedをセットして非同期処理を停止
+    _isDisposed = true;
     // タイマーを停止
     _pollTimer?.cancel();
+    _pollTimer = null;
     _treeRefreshTimer?.cancel();
+    _treeRefreshTimer = null;
     _terminalController.dispose();
     // SSH接続をクリーンアップ
     ref.read(sshProvider.notifier).disconnect();
@@ -398,6 +416,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     // tmux select-windowを実行
     await sshClient.exec(TmuxCommands.selectWindow(sessionName, windowIndex));
+    if (!mounted || _isDisposed) return;
 
     // tmux_providerでアクティブウィンドウを更新
     ref.read(tmuxProvider.notifier).setActiveWindow(windowIndex);
@@ -416,6 +435,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     // tmux select-paneを実行
     await sshClient.exec(TmuxCommands.selectPane(paneId));
+    if (!mounted || _isDisposed) return;
 
     // tmux_providerでアクティブペインを更新
     ref.read(tmuxProvider.notifier).setActivePane(paneId);
