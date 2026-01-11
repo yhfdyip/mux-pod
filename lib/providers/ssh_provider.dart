@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/background/foreground_task_service.dart';
@@ -57,10 +59,17 @@ class SshNotifier extends Notifier<SshState> {
   static const int _maxReconnectAttempts = 5;
   static const List<int> _reconnectDelays = [1000, 2000, 4000, 8000, 16000]; // 指数バックオフ
 
+  // 接続状態監視用
+  StreamSubscription<SshConnectionState>? _connectionStateSubscription;
+
+  // 切断検知コールバック（外部から設定可能）
+  void Function()? onDisconnectDetected;
+
   @override
   SshState build() {
     // クリーンアップを登録
     ref.onDispose(() {
+      _connectionStateSubscription?.cancel();
       _client?.dispose();
       _foregroundService.stopService();
     });
@@ -139,6 +148,10 @@ class SshNotifier extends Notifier<SshState> {
     _lastConnection = connection;
     _lastOptions = options;
 
+    // 既存の接続状態監視をキャンセル
+    await _connectionStateSubscription?.cancel();
+    _connectionStateSubscription = null;
+
     state = state.copyWith(
       connectionState: SshConnectionState.connecting,
       error: null,
@@ -148,6 +161,11 @@ class SshNotifier extends Notifier<SshState> {
 
     try {
       _client = SshClient();
+
+      // 接続状態のストリームを監視（切断検知の高速化）
+      _connectionStateSubscription = _client!.connectionStateStream.listen(
+        _onConnectionStateChanged,
+      );
 
       await _client!.connect(
         host: connection.host,
@@ -196,6 +214,30 @@ class SshNotifier extends Notifier<SshState> {
     }
   }
 
+  /// 接続状態変化のハンドラ
+  ///
+  /// Keep-aliveやソケットからの切断検知を即座に処理する。
+  void _onConnectionStateChanged(SshConnectionState newState) {
+    // 接続中の状態から切断/エラーになった場合
+    if (state.isConnected &&
+        (newState == SshConnectionState.error ||
+         newState == SshConnectionState.disconnected)) {
+      // 状態を更新
+      state = state.copyWith(
+        connectionState: newState,
+        error: newState == SshConnectionState.error ? 'Connection lost' : null,
+      );
+
+      // 切断検知コールバックを呼び出し
+      onDisconnectDetected?.call();
+
+      // 自動再接続を試みる（すでに再接続中でなければ）
+      if (!state.isReconnecting) {
+        reconnect();
+      }
+    }
+  }
+
   /// 再接続を試みる
   ///
   /// 自動再接続用。指数バックオフで最大5回まで試行する。
@@ -224,9 +266,18 @@ class SshNotifier extends Notifier<SshState> {
     await Future.delayed(Duration(milliseconds: delayMs));
 
     try {
+      // 既存の接続状態監視をキャンセル
+      await _connectionStateSubscription?.cancel();
+      _connectionStateSubscription = null;
+
       // 古いクライアントをクリーンアップ
       _client?.dispose();
       _client = SshClient();
+
+      // 接続状態のストリームを監視（切断検知の高速化）
+      _connectionStateSubscription = _client!.connectionStateStream.listen(
+        _onConnectionStateChanged,
+      );
 
       await _client!.connect(
         host: _lastConnection!.host,
@@ -269,6 +320,10 @@ class SshNotifier extends Notifier<SshState> {
 
   /// 切断
   Future<void> disconnect() async {
+    // 接続状態監視をキャンセル
+    await _connectionStateSubscription?.cancel();
+    _connectionStateSubscription = null;
+
     // Foreground Serviceを停止
     await _foregroundService.stopService();
 

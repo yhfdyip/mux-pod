@@ -120,6 +120,21 @@ class SshClient {
   StreamSubscription<Uint8List>? _stdoutSubscription;
   StreamSubscription<Uint8List>? _stderrSubscription;
 
+  /// Keep-aliveタイマー
+  Timer? _keepAliveTimer;
+
+  /// 接続監視用のStreamController
+  final _connectionStateController = StreamController<SshConnectionState>.broadcast();
+
+  /// 接続状態のストリーム（外部から監視用）
+  Stream<SshConnectionState> get connectionStateStream => _connectionStateController.stream;
+
+  /// Keep-alive間隔（秒）
+  static const int _keepAliveIntervalSeconds = 15;
+
+  /// Keep-aliveタイムアウト（秒）
+  static const int _keepAliveTimeoutSeconds = 5;
+
   /// 現在の接続状態
   SshConnectionState get state => _state;
 
@@ -180,6 +195,10 @@ class SshClient {
       await _client!.authenticated;
 
       _state = SshConnectionState.connected;
+      _connectionStateController.add(_state);
+
+      // Keep-aliveを開始
+      _startKeepAlive();
     } on SocketException catch (e) {
       _state = SshConnectionState.error;
       _lastError = 'Connection failed: ${e.message}';
@@ -249,12 +268,23 @@ class SshClient {
   /// 接続を切断する
   Future<void> disconnect() async {
     await _cleanup();
-    _state = SshConnectionState.disconnected;
+    _updateState(SshConnectionState.disconnected);
     _events.onClose?.call();
+  }
+
+  /// 状態を更新してストリームに通知
+  void _updateState(SshConnectionState newState) {
+    if (_state != newState) {
+      _state = newState;
+      _connectionStateController.add(newState);
+    }
   }
 
   /// リソースをクリーンアップ
   Future<void> _cleanup() async {
+    // Keep-aliveを停止
+    _stopKeepAlive();
+
     await _stdoutSubscription?.cancel();
     await _stderrSubscription?.cancel();
     _stdoutSubscription = null;
@@ -268,6 +298,45 @@ class SshClient {
 
     _socket?.close();
     _socket = null;
+  }
+
+  /// Keep-aliveを開始
+  ///
+  /// 定期的に軽量なコマンドを実行して接続が生きているか確認する。
+  /// 接続が切れていれば即座にエラー状態に遷移する。
+  void _startKeepAlive() {
+    _stopKeepAlive();
+    _keepAliveTimer = Timer.periodic(
+      Duration(seconds: _keepAliveIntervalSeconds),
+      (_) => _sendKeepAlive(),
+    );
+  }
+
+  /// Keep-aliveを停止
+  void _stopKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
+  }
+
+  /// Keep-aliveパケットを送信
+  Future<void> _sendKeepAlive() async {
+    if (!isConnected || _client == null) {
+      return;
+    }
+
+    try {
+      // 軽量なコマンドでkeep-alive（echoコマンド）
+      await exec(
+        'echo ping',
+        timeout: Duration(seconds: _keepAliveTimeoutSeconds),
+      );
+    } catch (e) {
+      // Keep-alive失敗 = 接続切断
+      _lastError = 'Connection lost: $e';
+      _updateState(SshConnectionState.error);
+      _events.onError?.call(SshConnectionError(_lastError!));
+      _events.onClose?.call();
+    }
   }
 
   /// インタラクティブシェルを開始する
@@ -503,6 +572,7 @@ class SshClient {
   /// リソースを解放する
   Future<void> dispose() async {
     await disconnect();
+    await _connectionStateController.close();
   }
 }
 
