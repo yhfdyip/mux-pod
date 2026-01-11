@@ -70,12 +70,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// Providerのリスナーを設定
   void _setupListeners() {
-    debugPrint('[DEBUG] _setupListeners: setting up listeners');
     // SSH状態の変化を監視
     _sshSubscription = ref.listenManual<SshState>(
       sshProvider,
       (previous, next) {
-        debugPrint('[DEBUG] sshProvider changed: ${previous?.connectionState} -> ${next.connectionState}');
         if (!mounted || _isDisposed) return;
         setState(() {
           _sshState = next;
@@ -88,7 +86,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _tmuxSubscription = ref.listenManual<TmuxState>(
       tmuxProvider,
       (previous, next) {
-        debugPrint('[DEBUG] tmuxProvider changed: sessions=${next.sessions.length}, active=${next.activeSessionName}');
         if (!mounted || _isDisposed) return;
         setState(() {
           // tmuxStateはbuild内で直接読み取る
@@ -96,14 +93,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       },
       fireImmediately: true,
     );
-    debugPrint('[DEBUG] _setupListeners: done');
   }
 
   /// SSH接続してtmuxセッションをセットアップ
   Future<void> _connectAndSetup() async {
-    debugPrint('[DEBUG] _connectAndSetup: started');
     if (!mounted) {
-      debugPrint('[DEBUG] _connectAndSetup: not mounted, returning');
       return;
     }
     setState(() {
@@ -114,54 +108,38 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       // 1. 接続情報を取得
       final connection = ref.read(connectionsProvider.notifier).getById(widget.connectionId);
-      debugPrint('[DEBUG] _connectAndSetup: connection=$connection');
       if (connection == null) {
         throw Exception('Connection not found');
       }
 
       // 2. 認証情報を取得
       final options = await _getAuthOptions(connection);
-      debugPrint('[DEBUG] _connectAndSetup: auth options obtained');
       if (!mounted || _isDisposed) {
-        debugPrint('[DEBUG] _connectAndSetup: unmounted after getAuthOptions');
         return;
       }
 
       // 3. SSH接続（シェルは起動しない - execのみ使用）
       final sshNotifier = ref.read(sshProvider.notifier);
       await sshNotifier.connectWithoutShell(connection, options);
-      debugPrint('[DEBUG] _connectAndSetup: SSH connected');
       if (!mounted || _isDisposed) {
-        debugPrint('[DEBUG] _connectAndSetup: unmounted after SSH connect');
         return;
       }
 
       // 4. セッションツリー全体を取得
       await _refreshSessionTree();
-      debugPrint('[DEBUG] _connectAndSetup: session tree refreshed');
       if (!mounted || _isDisposed) {
-        debugPrint('[DEBUG] _connectAndSetup: unmounted after refreshSessionTree');
         return;
       }
 
       final tmuxState = ref.read(tmuxProvider);
       final sessions = tmuxState.sessions;
-      debugPrint('[DEBUG] _connectAndSetup: sessions.length=${sessions.length}');
-      for (final s in sessions) {
-        debugPrint('[DEBUG]   session: ${s.name}, windows: ${s.windows.length}');
-        for (final w in s.windows) {
-          debugPrint('[DEBUG]     window: ${w.index}:${w.name}, panes: ${w.panes.length}');
-        }
-      }
 
       // 5. セッションを選択または新規作成
       String sessionName;
       if (sessions.isNotEmpty) {
         sessionName = widget.sessionName ?? sessions.first.name;
-        debugPrint('[DEBUG] _connectAndSetup: using existing session=$sessionName');
       } else {
         // セッションがない場合は新規作成
-        debugPrint('[DEBUG] _connectAndSetup: no sessions, creating new one');
         final sshClient = ref.read(sshProvider.notifier).client;
         sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
         await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
@@ -172,12 +150,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
       // 6. アクティブセッション/ウィンドウ/ペインを設定
       ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
-      final currentTarget = ref.read(tmuxProvider.notifier).currentTarget;
-      debugPrint('[DEBUG] _connectAndSetup: setActiveSession done, currentTarget=$currentTarget');
 
       // 7. 100msポーリング開始
       _startPolling();
-      debugPrint('[DEBUG] _connectAndSetup: polling started');
 
       // 8. 5秒ごとにセッションツリーを更新
       _startTreeRefresh();
@@ -186,10 +161,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       setState(() {
         _isConnecting = false;
       });
-      debugPrint('[DEBUG] _connectAndSetup: completed successfully');
-    } catch (e, stack) {
-      debugPrint('[DEBUG] _connectAndSetup: error=$e');
-      debugPrint('[DEBUG] $stack');
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _isConnecting = false;
@@ -201,28 +173,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   /// セッションツリー全体を取得して更新
   Future<void> _refreshSessionTree() async {
-    debugPrint('[DEBUG] _refreshSessionTree: started');
     if (_isDisposed) {
-      debugPrint('[DEBUG] _refreshSessionTree: disposed, returning');
       return;
     }
     final sshClient = ref.read(sshProvider.notifier).client;
     if (sshClient == null || !sshClient.isConnected) {
-      debugPrint('[DEBUG] _refreshSessionTree: sshClient null or not connected');
       return;
     }
 
     try {
       final cmd = TmuxCommands.listAllPanes();
-      debugPrint('[DEBUG] _refreshSessionTree: executing cmd=$cmd');
       final output = await sshClient.exec(cmd);
-      debugPrint('[DEBUG] _refreshSessionTree: output length=${output.length}');
-      debugPrint('[DEBUG] _refreshSessionTree: output=\n$output');
       if (!mounted || _isDisposed) return;
       ref.read(tmuxProvider.notifier).parseAndUpdateFullTree(output);
-      debugPrint('[DEBUG] _refreshSessionTree: parseAndUpdateFullTree done');
-    } catch (e) {
-      debugPrint('[DEBUG] _refreshSessionTree error: $e');
+    } catch (_) {
+      // ツリー更新エラーは静かに無視（次回ポーリングで再試行）
     }
   }
 
@@ -249,7 +214,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       final sshClient = ref.read(sshProvider.notifier).client;
       if (sshClient == null || !sshClient.isConnected) {
-        debugPrint('[DEBUG] _pollPaneContent: sshClient null or not connected');
         _isPolling = false;
         return;
       }
@@ -257,11 +221,6 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       // tmux_providerからターゲットを取得
       final target = ref.read(tmuxProvider.notifier).currentTarget;
       if (target == null) {
-        debugPrint('[DEBUG] _pollPaneContent: target is null');
-        final state = ref.read(tmuxProvider);
-        debugPrint('[DEBUG]   activeSessionName=${state.activeSessionName}');
-        debugPrint('[DEBUG]   activeWindowIndex=${state.activeWindowIndex}');
-        debugPrint('[DEBUG]   activePaneIndex=${state.activePaneIndex}');
         _isPolling = false;
         return;
       }
@@ -287,11 +246,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         // ターミナルをクリアして新しい内容を書き込む
         _terminal.write('\x1b[2J\x1b[H'); // 画面クリア + カーソルホーム
         _terminal.write(output);
-        debugPrint('[DEBUG] _pollPaneContent: updated content, length=${output.length}');
       }
     } catch (e) {
       // ポーリングエラーは静かに無視（接続エラーは別途ハンドリング）
-      debugPrint('[DEBUG] _pollPaneContent error: $e');
     } finally {
       _isPolling = false;
     }
@@ -1009,8 +966,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     try {
       await sshClient.exec(TmuxCommands.sendKeys(target, key, literal: literal));
-    } catch (e) {
-      debugPrint('Send key error: $e');
+    } catch (_) {
+      // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
   }
 
@@ -1025,8 +982,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       // 特殊キーはリテラルではなくtmux形式で送信
       await sshClient.exec(TmuxCommands.sendKeys(target, tmuxKey, literal: false));
-    } catch (e) {
-      debugPrint('Send special key error: $e');
+    } catch (_) {
+      // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
   }
 
