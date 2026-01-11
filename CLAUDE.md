@@ -100,3 +100,10 @@ class TmuxPane {
 - SSH鍵: flutter_secure_storage（暗号化）
 - パスワード: flutter_secure_storage（暗号化）
 - 生体認証対応（local_auth）
+
+## Active Technologies
+- Dart 3.10+ / Flutter 3.24+ + dartssh2 (SSH), xterm (ターミナル表示), flutter_riverpod (状態管理) (001-ssh-terminal-integration)
+- flutter_secure_storage (SSH鍵/パスワード), shared_preferences (接続設定) (001-ssh-terminal-integration)
+
+## Recent Changes
+- 001-ssh-terminal-integration: Added Dart 3.10+ / Flutter 3.24+ + dartssh2 (SSH), xterm (ターミナル表示), flutter_riverpod (状態管理)
