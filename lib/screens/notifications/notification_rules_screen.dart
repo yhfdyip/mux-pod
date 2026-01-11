@@ -35,6 +35,7 @@ class NotificationRulesScreen extends ConsumerWidget {
                   },
                 ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'fab_add_notification_rule',
         onPressed: () {
           _showAddRuleDialog(context, ref);
         },

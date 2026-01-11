@@ -91,6 +91,7 @@ class ConnectionsScreen extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 72),
       child: FloatingActionButton.extended(
+        heroTag: 'fab_add_connection',
         onPressed: () => _addConnection(context, ref),
         icon: const Icon(Icons.add, size: 20),
         label: const Text('Add New Connection'),
