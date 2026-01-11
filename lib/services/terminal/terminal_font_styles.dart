@@ -14,6 +14,15 @@ class TerminalFontStyles {
     'UDEV Gothic NF',
   ];
 
+  /// フォントフォールバック（特殊記号・絵文字用）
+  /// Nerd Fontsや記号をサポートするフォントにフォールバック
+  static const List<String> _fontFamilyFallback = [
+    'Noto Sans Symbols 2',
+    'Noto Color Emoji',
+    'Symbols Nerd Font',
+    'Noto Sans Symbols',
+  ];
+
   /// サポートするフォントファミリーのリスト
   static const List<String> supportedFontFamilies = [
     'JetBrains Mono',
@@ -59,6 +68,7 @@ class TerminalFontStyles {
     if (_bundledFontFamilies.contains(fontFamily)) {
       return TextStyle(
         fontFamily: _bundledFontMap[fontFamily],
+        fontFamilyFallback: _fontFamilyFallback,
         fontSize: fontSize,
         height: height,
         color: color,
@@ -70,9 +80,10 @@ class TerminalFontStyles {
     }
 
     // Google Fontsの場合
+    TextStyle baseStyle;
     switch (fontFamily) {
       case 'JetBrains Mono':
-        return GoogleFonts.jetBrainsMono(
+        baseStyle = GoogleFonts.jetBrainsMono(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -81,8 +92,9 @@ class TerminalFontStyles {
           fontStyle: fontStyle,
           decoration: decoration,
         );
+        break;
       case 'Fira Code':
-        return GoogleFonts.firaCode(
+        baseStyle = GoogleFonts.firaCode(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -91,8 +103,9 @@ class TerminalFontStyles {
           fontStyle: fontStyle,
           decoration: decoration,
         );
+        break;
       case 'Source Code Pro':
-        return GoogleFonts.sourceCodePro(
+        baseStyle = GoogleFonts.sourceCodePro(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -101,8 +114,9 @@ class TerminalFontStyles {
           fontStyle: fontStyle,
           decoration: decoration,
         );
+        break;
       case 'Roboto Mono':
-        return GoogleFonts.robotoMono(
+        baseStyle = GoogleFonts.robotoMono(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -111,8 +125,9 @@ class TerminalFontStyles {
           fontStyle: fontStyle,
           decoration: decoration,
         );
+        break;
       case 'Ubuntu Mono':
-        return GoogleFonts.ubuntuMono(
+        baseStyle = GoogleFonts.ubuntuMono(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -121,8 +136,9 @@ class TerminalFontStyles {
           fontStyle: fontStyle,
           decoration: decoration,
         );
+        break;
       case 'Inconsolata':
-        return GoogleFonts.inconsolata(
+        baseStyle = GoogleFonts.inconsolata(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -131,9 +147,10 @@ class TerminalFontStyles {
           fontStyle: fontStyle,
           decoration: decoration,
         );
+        break;
       default:
         // デフォルトはJetBrains Mono
-        return GoogleFonts.jetBrainsMono(
+        baseStyle = GoogleFonts.jetBrainsMono(
           fontSize: fontSize,
           height: height,
           color: color,
@@ -143,5 +160,8 @@ class TerminalFontStyles {
           decoration: decoration,
         );
     }
+
+    // フォントフォールバックを追加（特殊記号・絵文字対応）
+    return baseStyle.copyWith(fontFamilyFallback: _fontFamilyFallback);
   }
 }
