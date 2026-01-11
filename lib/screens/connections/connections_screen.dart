@@ -59,11 +59,13 @@ class ConnectionsScreen extends ConsumerWidget {
   }
 
   Widget _buildAppBar(BuildContext context, WidgetRef ref, bool isSearchVisible, String searchQuery) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return SliverAppBar(
       floating: true,
       pinned: true,
       expandedHeight: isSearchVisible ? 140 : 100,
-      backgroundColor: DesignColors.canvasDark.withValues(alpha: 0.95),
+      backgroundColor: colorScheme.surface.withValues(alpha: 0.95),
       surfaceTintColor: Colors.transparent,
       flexibleSpace: FlexibleSpaceBar(
         titlePadding: const EdgeInsets.only(left: 24, bottom: 16),
@@ -76,7 +78,7 @@ class ConnectionsScreen extends ConsumerWidget {
               style: GoogleFonts.spaceGrotesk(
                 fontSize: 24,
                 fontWeight: FontWeight.w700,
-                color: Colors.white,
+                color: colorScheme.onSurface,
                 letterSpacing: -0.5,
               ),
             ),
@@ -103,7 +105,7 @@ class ConnectionsScreen extends ConsumerWidget {
         IconButton(
           icon: Icon(
             isSearchVisible ? Icons.search_off : Icons.search,
-            color: isSearchVisible ? DesignColors.primary : DesignColors.textSecondary,
+            color: isSearchVisible ? colorScheme.primary : (isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight),
           ),
           onPressed: () {
             final wasVisible = isSearchVisible;
@@ -116,7 +118,7 @@ class ConnectionsScreen extends ConsumerWidget {
           tooltip: isSearchVisible ? 'Close Search' : 'Search',
         ),
         IconButton(
-          icon: const Icon(Icons.sort, color: DesignColors.textSecondary),
+          icon: Icon(Icons.sort, color: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight),
           onPressed: () => _showSortDialog(context, ref),
           tooltip: 'Sort',
         ),
@@ -137,14 +139,16 @@ class ConnectionsScreen extends ConsumerWidget {
 
   void _showSortDialog(BuildContext context, WidgetRef ref) {
     final currentSort = ref.read(connectionSortProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: DesignColors.surfaceDark,
+      backgroundColor: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
+      builder: (sheetContext) {
+        final sheetColorScheme = Theme.of(sheetContext).colorScheme;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -153,20 +157,20 @@ class ConnectionsScreen extends ConsumerWidget {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    const Icon(Icons.sort, color: DesignColors.primary),
+                    Icon(Icons.sort, color: sheetColorScheme.primary),
                     const SizedBox(width: 8),
                     Text(
                       'Sort Connections',
                       style: GoogleFonts.spaceGrotesk(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                        color: sheetColorScheme.onSurface,
                       ),
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1, color: DesignColors.borderDark),
+              Divider(height: 1, color: isDark ? DesignColors.borderDark : DesignColors.borderLight),
               _SortOptionTile(
                 title: 'Name (A-Z)',
                 option: ConnectionSortOption.nameAsc,
@@ -230,14 +234,15 @@ class ConnectionsScreen extends ConsumerWidget {
   }
 
   Widget _buildFAB(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
     return FloatingActionButton.extended(
       heroTag: 'fab_add_connection',
       onPressed: () => _addConnection(context, ref),
       icon: const Icon(Icons.add, size: 20),
       label: const Text('Add New Connection'),
       elevation: 0,
-      backgroundColor: DesignColors.primary,
-      foregroundColor: Colors.black,
+      backgroundColor: colorScheme.primary,
+      foregroundColor: colorScheme.onPrimary,
     );
   }
 
@@ -287,6 +292,8 @@ class ConnectionsScreen extends ConsumerWidget {
   }
 
   Widget _buildNoResultsState(BuildContext context, WidgetRef ref) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -294,14 +301,14 @@ class ConnectionsScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: DesignColors.surfaceDark,
+              color: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: DesignColors.borderDark),
+              border: Border.all(color: isDark ? DesignColors.borderDark : DesignColors.borderLight),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.search_off,
               size: 64,
-              color: DesignColors.textMuted,
+              color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
             ),
           ),
           const SizedBox(height: 24),
@@ -310,7 +317,7 @@ class ConnectionsScreen extends ConsumerWidget {
             style: GoogleFonts.spaceGrotesk(
               fontSize: 20,
               fontWeight: FontWeight.w600,
-              color: DesignColors.textSecondary,
+              color: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight,
             ),
           ),
           const SizedBox(height: 8),
@@ -318,7 +325,7 @@ class ConnectionsScreen extends ConsumerWidget {
             'Try a different search term',
             style: GoogleFonts.spaceGrotesk(
               fontSize: 14,
-              color: DesignColors.textMuted,
+              color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
             ),
           ),
           const SizedBox(height: 16),
@@ -330,7 +337,7 @@ class ConnectionsScreen extends ConsumerWidget {
             icon: const Icon(Icons.clear),
             label: const Text('Clear Search'),
             style: TextButton.styleFrom(
-              foregroundColor: DesignColors.primary,
+              foregroundColor: colorScheme.primary,
             ),
           ),
         ],
@@ -363,6 +370,7 @@ class ConnectionsScreen extends ConsumerWidget {
   }
 
   Widget _buildEmptyState(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -370,14 +378,14 @@ class ConnectionsScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: DesignColors.surfaceDark,
+              color: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: DesignColors.borderDark),
+              border: Border.all(color: isDark ? DesignColors.borderDark : DesignColors.borderLight),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.dns_outlined,
               size: 64,
-              color: DesignColors.textMuted,
+              color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
             ),
           ),
           const SizedBox(height: 24),
@@ -386,7 +394,7 @@ class ConnectionsScreen extends ConsumerWidget {
             style: GoogleFonts.spaceGrotesk(
               fontSize: 20,
               fontWeight: FontWeight.w600,
-              color: DesignColors.textSecondary,
+              color: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight,
             ),
           ),
           const SizedBox(height: 8),
@@ -394,7 +402,7 @@ class ConnectionsScreen extends ConsumerWidget {
             'Tap the button below to add your first server',
             style: GoogleFonts.spaceGrotesk(
               fontSize: 14,
-              color: DesignColors.textMuted,
+              color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
             ),
           ),
         ],
@@ -509,6 +517,8 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     // アクティブセッションからこの接続のセッション情報を取得
     final activeSessionsState = ref.watch(activeSessionsProvider);
     final activeSessions =
@@ -519,16 +529,16 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
     final isConnected = hasActiveSessions || widget.connection.lastConnectedAt != null;
     final statusColor = hasActiveSessions
         ? DesignColors.success
-        : (isConnected ? Colors.orange : DesignColors.textMuted);
+        : (isConnected ? Colors.orange : (isDark ? DesignColors.textMuted : DesignColors.textMutedLight));
 
     return Container(
       decoration: BoxDecoration(
-        color: DesignColors.surfaceDark,
+        color: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: DesignColors.borderDark),
+        border: Border.all(color: isDark ? DesignColors.borderDark : DesignColors.borderLight),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -552,12 +562,12 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                         height: 40,
                         decoration: BoxDecoration(
                           color: hasActiveSessions
-                              ? const Color(0xFF153E42)
-                              : DesignColors.borderDark,
+                              ? (isDark ? DesignColors.connectingCardDark : DesignColors.connectingCardLight)
+                              : (isDark ? DesignColors.borderDark : DesignColors.borderLight),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: hasActiveSessions
-                                ? const Color(0xFF1F5F66)
+                                ? (isDark ? DesignColors.connectingCardBorderDark : DesignColors.connectingCardBorderLight)
                                 : Colors.transparent,
                           ),
                         ),
@@ -565,8 +575,8 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                           Icons.dns,
                           size: 20,
                           color: hasActiveSessions
-                              ? DesignColors.primary
-                              : DesignColors.textSecondary,
+                              ? colorScheme.primary
+                              : (isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight),
                         ),
                       ),
                       Positioned(
@@ -579,7 +589,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                             color: statusColor,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: DesignColors.surfaceDark,
+                              color: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
                               width: 2,
                             ),
                             boxShadow: hasActiveSessions
@@ -606,7 +616,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                           style: GoogleFonts.spaceGrotesk(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                            color: colorScheme.onSurface,
                             letterSpacing: 0.3,
                           ),
                         ),
@@ -615,7 +625,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                           '${widget.connection.host} • ${widget.connection.username}',
                           style: GoogleFonts.jetBrainsMono(
                             fontSize: 12,
-                            color: DesignColors.textMuted,
+                            color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                           ),
                         ),
                       ],
@@ -624,14 +634,14 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                   // Expand Icon
                   Icon(
                     _isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: DesignColors.textMuted,
+                    color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                   ),
                 ],
               ),
             ),
           ),
           // Expanded Content - Sessions List
-          if (_isExpanded) _buildExpandedContent(activeSessions),
+          if (_isExpanded) _buildExpandedContent(activeSessions, isDark, colorScheme),
         ],
       ),
     );
@@ -706,12 +716,12 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
     }
   }
 
-  Widget _buildExpandedContent(List<ActiveSession> activeSessions) {
+  Widget _buildExpandedContent(List<ActiveSession> activeSessions, bool isDark, ColorScheme colorScheme) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF15161C),
-        border: Border(top: BorderSide(color: DesignColors.borderDark)),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF15161C) : const Color(0xFFF8F9FA),
+        border: Border(top: BorderSide(color: isDark ? DesignColors.borderDark : DesignColors.borderLight)),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -724,7 +734,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
               style: GoogleFonts.spaceGrotesk(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                color: DesignColors.textMuted,
+                color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                 letterSpacing: 1.5,
               ),
             ),
@@ -759,13 +769,13 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                 'No tmux sessions found',
                 style: GoogleFonts.jetBrainsMono(
                   fontSize: 12,
-                  color: DesignColors.textMuted,
+                  color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                 ),
               ),
             )
           else
             // セッションリスト（_sessionsまたはactiveSessionsを使用）
-            ..._buildSessionItems(),
+            ..._buildSessionItems(isDark, colorScheme),
           // New Session Button
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -774,9 +784,9 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
               icon: const Icon(Icons.add, size: 16),
               label: const Text('New Session'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: DesignColors.primary.withValues(alpha: 0.8),
+                foregroundColor: colorScheme.primary.withValues(alpha: 0.8),
                 side: BorderSide(
-                  color: DesignColors.primary.withValues(alpha: 0.3),
+                  color: colorScheme.primary.withValues(alpha: 0.3),
                   style: BorderStyle.solid,
                 ),
                 padding: const EdgeInsets.symmetric(vertical: 10),
@@ -784,7 +794,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
               ),
             ),
           ),
-          const Divider(color: DesignColors.borderDark, height: 1),
+          Divider(color: isDark ? DesignColors.borderDark : DesignColors.borderLight, height: 1),
           // Action Buttons
           Padding(
             padding: const EdgeInsets.all(12),
@@ -796,7 +806,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                     icon: const Icon(Icons.edit, size: 16),
                     label: const Text('Edit'),
                     style: TextButton.styleFrom(
-                      foregroundColor: DesignColors.textSecondary,
+                      foregroundColor: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight,
                     ),
                   ),
                 ),
@@ -818,7 +828,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
     );
   }
 
-  List<Widget> _buildSessionItems() {
+  List<Widget> _buildSessionItems(bool isDark, ColorScheme colorScheme) {
     // _sessionsを使用（フェッチ結果）
     final sessions = _sessions;
     if (sessions.isEmpty) return [];
@@ -834,7 +844,7 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
               Icon(
                 Icons.terminal,
                 size: 16,
-                color: isAttached ? DesignColors.primary : DesignColors.textMuted,
+                color: isAttached ? colorScheme.primary : (isDark ? DesignColors.textMuted : DesignColors.textMutedLight),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -846,14 +856,14 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                       style: GoogleFonts.spaceGrotesk(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                        color: colorScheme.onSurface,
                       ),
                     ),
                     Text(
                       '${session.windowCount} windows',
                       style: GoogleFonts.jetBrainsMono(
                         fontSize: 11,
-                        color: DesignColors.textMuted,
+                        color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                       ),
                     ),
                   ],
@@ -864,13 +874,13 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: isAttached
-                      ? const Color(0xFF14532D).withValues(alpha: 0.5)
-                      : DesignColors.borderDark,
+                      ? (isDark ? DesignColors.connectedCardDark.withValues(alpha: 0.5) : DesignColors.connectedCardLight)
+                      : (isDark ? DesignColors.borderDark : DesignColors.borderLight),
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
                     color: isAttached
-                        ? const Color(0xFF166534).withValues(alpha: 0.7)
-                        : DesignColors.borderDark,
+                        ? (isDark ? DesignColors.connectedCardBorderDark.withValues(alpha: 0.7) : DesignColors.connectedCardBorderLight)
+                        : (isDark ? DesignColors.borderDark : DesignColors.borderLight),
                   ),
                 ),
                 child: Text(
@@ -878,7 +888,9 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
                   style: GoogleFonts.jetBrainsMono(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
-                    color: isAttached ? const Color(0xFF4ADE80) : DesignColors.textMuted,
+                    color: isAttached
+                        ? (isDark ? DesignColors.connectedCardTextDark : DesignColors.connectedCardTextLight)
+                        : (isDark ? DesignColors.textMuted : DesignColors.textMutedLight),
                   ),
                 ),
               ),
@@ -931,22 +943,24 @@ class _SearchFieldState extends State<_SearchField> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     return TextField(
       controller: _controller,
       autofocus: true,
       onChanged: widget.onChanged,
       style: GoogleFonts.jetBrainsMono(
         fontSize: 12,
-        color: Colors.white,
+        color: colorScheme.onSurface,
       ),
       decoration: InputDecoration(
         hintText: 'Search connections...',
         hintStyle: GoogleFonts.jetBrainsMono(
           fontSize: 12,
-          color: DesignColors.textMuted,
+          color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
         ),
         filled: true,
-        fillColor: DesignColors.inputDark,
+        fillColor: isDark ? DesignColors.inputDark : DesignColors.inputLight,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -954,7 +968,7 @@ class _SearchFieldState extends State<_SearchField> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: DesignColors.primary, width: 1),
+          borderSide: BorderSide(color: colorScheme.primary, width: 1),
         ),
         suffixIcon: _controller.text.isNotEmpty
             ? IconButton(
@@ -963,7 +977,7 @@ class _SearchFieldState extends State<_SearchField> {
                   _controller.clear();
                   widget.onClear();
                 },
-                color: DesignColors.textMuted,
+                color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
               )
@@ -989,6 +1003,7 @@ class _SortOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isSelected = option == currentOption;
     return ListTile(
       title: Text(
@@ -996,11 +1011,11 @@ class _SortOptionTile extends StatelessWidget {
         style: GoogleFonts.spaceGrotesk(
           fontSize: 14,
           fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
-          color: isSelected ? DesignColors.primary : Colors.white,
+          color: isSelected ? colorScheme.primary : colorScheme.onSurface,
         ),
       ),
       trailing: isSelected
-          ? const Icon(Icons.check, color: DesignColors.primary, size: 20)
+          ? Icon(Icons.check, color: colorScheme.primary, size: 20)
           : null,
       onTap: onTap,
     );
