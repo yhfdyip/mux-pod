@@ -287,8 +287,20 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
             transformationController: _transformationController,
             minScale: 0.5,
             maxScale: 5.0,
+            constrained: false,
+            boundaryMargin: const EdgeInsets.all(double.infinity),
             panEnabled: true,
             scaleEnabled: true,
+            onInteractionUpdate: (details) {
+              // ズーム中もスケール表示を更新
+              final scale = _transformationController.value.getMaxScaleOnAxis();
+              if (scale != _currentScale) {
+                setState(() {
+                  _currentScale = scale;
+                });
+                widget.onZoomChanged?.call(scale);
+              }
+            },
             onInteractionEnd: (details) {
               // ズームスケールを取得して通知
               final scale = _transformationController.value.getMaxScaleOnAxis();
