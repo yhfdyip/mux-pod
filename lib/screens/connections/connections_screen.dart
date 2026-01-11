@@ -4,8 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../providers/active_session_provider.dart';
 import '../../providers/connection_provider.dart';
 import '../../services/keychain/secure_storage.dart';
+import '../../services/ssh/ssh_client.dart';
+import '../../services/tmux/tmux_commands.dart';
+import '../../services/tmux/tmux_parser.dart';
 import '../../theme/design_colors.dart';
 import 'connection_form_screen.dart';
 import '../terminal/terminal_screen.dart';
@@ -129,7 +133,8 @@ class ConnectionsScreen extends ConsumerWidget {
             padding: const EdgeInsets.only(bottom: 12),
             child: _ConnectionCard(
               connection: connection,
-              onTap: () => _connectToServer(context, ref, connection),
+              onConnect: (sessionName) =>
+                  _connectToServer(context, ref, connection, sessionName),
               onEdit: () => _editConnection(context, ref, connection),
               onDelete: () => _deleteConnection(context, ref, connection),
             ),
@@ -267,41 +272,61 @@ class ConnectionsScreen extends ConsumerWidget {
     }
   }
 
-  void _connectToServer(BuildContext context, WidgetRef ref, Connection connection) {
+  void _connectToServer(
+    BuildContext context,
+    WidgetRef ref,
+    Connection connection,
+    String? sessionName,
+  ) {
     ref.read(connectionsProvider.notifier).updateLastConnected(connection.id);
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => TerminalScreen(connectionId: connection.id),
+        builder: (context) => TerminalScreen(
+          connectionId: connection.id,
+          sessionName: sessionName,
+        ),
       ),
     );
   }
 }
 
-/// 接続カード（展開可能）
-class _ConnectionCard extends StatefulWidget {
+/// 接続カード（展開可能、tmuxセッション表示）
+class _ConnectionCard extends ConsumerStatefulWidget {
   final Connection connection;
-  final VoidCallback onTap;
+  final void Function(String? sessionName) onConnect;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _ConnectionCard({
     required this.connection,
-    required this.onTap,
+    required this.onConnect,
     required this.onEdit,
     required this.onDelete,
   });
 
   @override
-  State<_ConnectionCard> createState() => _ConnectionCardState();
+  ConsumerState<_ConnectionCard> createState() => _ConnectionCardState();
 }
 
-class _ConnectionCardState extends State<_ConnectionCard> {
+class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
   bool _isExpanded = false;
+  bool _isLoadingSessions = false;
+  List<TmuxSession> _sessions = [];
+  String? _sessionError;
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = widget.connection.lastConnectedAt != null;
-    final statusColor = isConnected ? DesignColors.success : DesignColors.textMuted;
+    // アクティブセッションからこの接続のセッション情報を取得
+    final activeSessionsState = ref.watch(activeSessionsProvider);
+    final activeSessions =
+        activeSessionsState.getSessionsForConnection(widget.connection.id);
+    final hasActiveSessions = activeSessions.isNotEmpty;
+
+    // 接続状態の判定（アクティブセッションがあるか、lastConnectedAtがあるか）
+    final isConnected = hasActiveSessions || widget.connection.lastConnectedAt != null;
+    final statusColor = hasActiveSessions
+        ? DesignColors.success
+        : (isConnected ? Colors.orange : DesignColors.textMuted);
 
     return Container(
       decoration: BoxDecoration(
@@ -320,7 +345,7 @@ class _ConnectionCardState extends State<_ConnectionCard> {
         children: [
           // Card Header
           InkWell(
-            onTap: () => setState(() => _isExpanded = !_isExpanded),
+            onTap: () => _toggleExpand(),
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -333,12 +358,12 @@ class _ConnectionCardState extends State<_ConnectionCard> {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: isConnected
+                          color: hasActiveSessions
                               ? const Color(0xFF153E42)
                               : DesignColors.borderDark,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: isConnected
+                            color: hasActiveSessions
                                 ? const Color(0xFF1F5F66)
                                 : Colors.transparent,
                           ),
@@ -346,7 +371,7 @@ class _ConnectionCardState extends State<_ConnectionCard> {
                         child: Icon(
                           Icons.dns,
                           size: 20,
-                          color: isConnected
+                          color: hasActiveSessions
                               ? DesignColors.primary
                               : DesignColors.textSecondary,
                         ),
@@ -364,7 +389,7 @@ class _ConnectionCardState extends State<_ConnectionCard> {
                               color: DesignColors.surfaceDark,
                               width: 2,
                             ),
-                            boxShadow: isConnected
+                            boxShadow: hasActiveSessions
                                 ? [
                                     BoxShadow(
                                       color: statusColor.withValues(alpha: 0.6),
@@ -412,78 +437,187 @@ class _ConnectionCardState extends State<_ConnectionCard> {
               ),
             ),
           ),
-          // Expanded Content
-          if (_isExpanded) _buildExpandedContent(),
+          // Expanded Content - Sessions List
+          if (_isExpanded) _buildExpandedContent(activeSessions),
         ],
       ),
     );
   }
 
-  Widget _buildExpandedContent() {
+  void _toggleExpand() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+    });
+    // 展開時にセッション情報をフェッチ
+    if (_isExpanded && _sessions.isEmpty && !_isLoadingSessions) {
+      _fetchSessions();
+    }
+  }
+
+  Future<void> _fetchSessions() async {
+    setState(() {
+      _isLoadingSessions = true;
+      _sessionError = null;
+    });
+
+    try {
+      final connection = widget.connection;
+      final storage = SecureStorageService();
+
+      // 認証オプションを取得
+      SshConnectOptions options;
+      if (connection.authMethod == 'key' && connection.keyId != null) {
+        final privateKey = await storage.getPrivateKey(connection.keyId!);
+        final passphrase = await storage.getPassphrase(connection.keyId!);
+        options = SshConnectOptions(privateKey: privateKey, passphrase: passphrase);
+      } else {
+        final password = await storage.getPassword(connection.id);
+        options = SshConnectOptions(password: password);
+      }
+
+      // SSH接続してセッション一覧を取得
+      final sshClient = SshClient();
+      await sshClient.connect(
+        host: connection.host,
+        port: connection.port,
+        username: connection.username,
+        options: options,
+      );
+
+      final output = await sshClient.exec(TmuxCommands.listSessions());
+      final sessions = TmuxParser.parseSessions(output);
+
+      // 切断
+      await sshClient.disconnect();
+
+      if (!mounted) return;
+
+      setState(() {
+        _sessions = sessions;
+        _isLoadingSessions = false;
+      });
+
+      // ActiveSessionsProviderを更新
+      ref.read(activeSessionsProvider.notifier).updateSessionsForConnection(
+            connectionId: connection.id,
+            connectionName: connection.name,
+            host: connection.host,
+            tmuxSessions: sessions,
+          );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingSessions = false;
+        _sessionError = e.toString();
+      });
+    }
+  }
+
+  Widget _buildExpandedContent(List<ActiveSession> activeSessions) {
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF15161C),
         border: Border(top: BorderSide(color: DesignColors.borderDark)),
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
       ),
-      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Connection Details
-          _buildDetailRow(Icons.person, 'User', widget.connection.username),
-          const SizedBox(height: 8),
-          _buildDetailRow(Icons.numbers, 'Port', widget.connection.port.toString()),
-          const SizedBox(height: 8),
-          _buildDetailRow(
-            widget.connection.authMethod == 'key' ? Icons.vpn_key : Icons.password,
-            'Auth',
-            widget.connection.authMethod == 'key' ? 'SSH Key' : 'Password',
+          // Sessions Section
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text(
+              'ACTIVE SESSIONS',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: DesignColors.textMuted,
+                letterSpacing: 1.5,
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
+          // Sessions List
+          if (_isLoadingSessions)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else if (_sessionError != null)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                _sessionError!,
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 12,
+                  color: DesignColors.error,
+                ),
+              ),
+            )
+          else if (_sessions.isEmpty && activeSessions.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'No tmux sessions found',
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 12,
+                  color: DesignColors.textMuted,
+                ),
+              ),
+            )
+          else
+            // セッションリスト（_sessionsまたはactiveSessionsを使用）
+            ..._buildSessionItems(),
+          // New Session Button
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: OutlinedButton.icon(
+              onPressed: () => widget.onConnect(null),
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('New Session'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: DesignColors.primary.withValues(alpha: 0.8),
+                side: BorderSide(
+                  color: DesignColors.primary.withValues(alpha: 0.3),
+                  style: BorderStyle.solid,
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                minimumSize: const Size(double.infinity, 0),
+              ),
+            ),
+          ),
+          const Divider(color: DesignColors.borderDark, height: 1),
           // Action Buttons
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: widget.onEdit,
-                  icon: const Icon(Icons.edit, size: 18),
-                  label: const Text('Edit'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: DesignColors.textSecondary,
-                    side: const BorderSide(color: DesignColors.borderDark),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: widget.onEdit,
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text('Edit'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: DesignColors.textSecondary,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: widget.onDelete,
-                  icon: const Icon(Icons.delete, size: 18),
-                  label: const Text('Delete'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: DesignColors.error,
-                    side: const BorderSide(color: DesignColors.error),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: widget.onDelete,
+                    icon: const Icon(Icons.delete, size: 16),
+                    label: const Text('Delete'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: DesignColors.error,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Connect Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: widget.onTap,
-              icon: const Icon(Icons.terminal, size: 18),
-              label: const Text('CONNECT'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: DesignColors.primary,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              ],
             ),
           ),
         ],
@@ -491,27 +625,74 @@ class _ConnectionCardState extends State<_ConnectionCard> {
     );
   }
 
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: DesignColors.textMuted),
-        const SizedBox(width: 8),
-        Text(
-          '$label:',
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 12,
-            color: DesignColors.textMuted,
+  List<Widget> _buildSessionItems() {
+    // _sessionsを使用（フェッチ結果）
+    final sessions = _sessions;
+    if (sessions.isEmpty) return [];
+
+    return sessions.map((session) {
+      final isAttached = session.attached;
+      return InkWell(
+        onTap: () => widget.onConnect(session.name),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.terminal,
+                size: 16,
+                color: isAttached ? DesignColors.primary : DesignColors.textMuted,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.name,
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Text(
+                      '${session.windowCount} windows',
+                      style: GoogleFonts.jetBrainsMono(
+                        fontSize: 11,
+                        color: DesignColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Status Badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isAttached
+                      ? const Color(0xFF14532D).withValues(alpha: 0.5)
+                      : DesignColors.borderDark,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isAttached
+                        ? const Color(0xFF166534).withValues(alpha: 0.7)
+                        : DesignColors.borderDark,
+                  ),
+                ),
+                child: Text(
+                  isAttached ? 'Attached' : 'Detached',
+                  style: GoogleFonts.jetBrainsMono(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: isAttached ? const Color(0xFF4ADE80) : DesignColors.textMuted,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          value,
-          style: GoogleFonts.jetBrainsMono(
-            fontSize: 12,
-            color: DesignColors.textSecondary,
-          ),
-        ),
-      ],
-    );
+      );
+    }).toList();
   }
 }

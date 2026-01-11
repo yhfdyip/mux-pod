@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../providers/active_session_provider.dart';
 import '../theme/design_colors.dart';
 import 'connections/connections_screen.dart';
 import 'keys/keys_screen.dart';
 import 'settings/settings_screen.dart';
+import 'terminal/terminal_screen.dart';
 
 /// 現在のタブインデックス Notifier
 class CurrentTabNotifier extends Notifier<int> {
@@ -30,7 +33,7 @@ class HomeScreen extends ConsumerWidget {
         index: currentTab,
         children: const [
           ConnectionsScreen(),
-          _TerminalPlaceholder(),
+          _TerminalTab(),
           KeysScreen(),
           SettingsScreen(),
         ],
@@ -158,37 +161,261 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-/// ターミナルタブプレースホルダー
-class _TerminalPlaceholder extends StatelessWidget {
-  const _TerminalPlaceholder();
+/// ターミナルタブ - アクティブセッション一覧表示
+class _TerminalTab extends ConsumerWidget {
+  const _TerminalTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeSessionsState = ref.watch(activeSessionsProvider);
+    final sessions = activeSessionsState.sessions;
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          _buildAppBar(context),
+          if (sessions.isEmpty)
+            const SliverFillRemaining(
+              child: _EmptySessionsView(),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final session = sessions[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _SessionCard(
+                        session: session,
+                        onTap: () => _openSession(context, ref, session),
+                      ),
+                    );
+                  },
+                  childCount: sessions.length,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAppBar(BuildContext context) {
+    return SliverAppBar(
+      floating: true,
+      pinned: true,
+      expandedHeight: 100,
+      backgroundColor: DesignColors.canvasDark.withValues(alpha: 0.95),
+      surfaceTintColor: Colors.transparent,
+      flexibleSpace: FlexibleSpaceBar(
+        titlePadding: const EdgeInsets.only(left: 24, bottom: 16),
+        title: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Active Sessions',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'TERMINAL_MODE: READY',
+              style: GoogleFonts.jetBrainsMono(
+                fontSize: 10,
+                fontWeight: FontWeight.w400,
+                color: DesignColors.textMuted,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openSession(BuildContext context, WidgetRef ref, ActiveSession session) {
+    ref.read(activeSessionsProvider.notifier).setCurrentSession(
+          session.connectionId,
+          session.sessionName,
+        );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => TerminalScreen(
+          connectionId: session.connectionId,
+          sessionName: session.sessionName,
+        ),
+      ),
+    );
+  }
+}
+
+/// 空のセッション表示
+class _EmptySessionsView extends StatelessWidget {
+  const _EmptySessionsView();
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: DesignColors.surfaceDark,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: DesignColors.borderDark),
+            ),
+            child: const Icon(
               Icons.terminal,
               size: 64,
               color: DesignColors.textMuted,
             ),
-            SizedBox(height: 16),
-            Text(
-              'No Active Terminal',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: DesignColors.textMuted,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'No Active Sessions',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: DesignColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Connect to a server to start a terminal session',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 14,
+              color: DesignColors.textMuted,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// セッションカード
+class _SessionCard extends StatelessWidget {
+  final ActiveSession session;
+  final VoidCallback onTap;
+
+  const _SessionCard({
+    required this.session,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isAttached = session.isAttached;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: DesignColors.surfaceDark,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: DesignColors.borderDark),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Terminal Icon
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: isAttached
+                    ? const Color(0xFF153E42)
+                    : DesignColors.borderDark,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isAttached
+                      ? const Color(0xFF1F5F66)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Icon(
+                Icons.terminal,
+                size: 20,
+                color: isAttached
+                    ? DesignColors.primary
+                    : DesignColors.textSecondary,
               ),
             ),
-            SizedBox(height: 8),
-            Text(
-              'Connect to a server to open a terminal',
-              style: TextStyle(
-                fontSize: 14,
-                color: DesignColors.textMuted,
+            const SizedBox(width: 16),
+            // Session Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    session.sessionName,
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${session.connectionName} • ${session.host}',
+                    style: GoogleFonts.jetBrainsMono(
+                      fontSize: 12,
+                      color: DesignColors.textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${session.windowCount} windows',
+                    style: GoogleFonts.jetBrainsMono(
+                      fontSize: 11,
+                      color: DesignColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Status Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: isAttached
+                    ? const Color(0xFF14532D).withValues(alpha: 0.5)
+                    : DesignColors.borderDark,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isAttached
+                      ? const Color(0xFF166534).withValues(alpha: 0.7)
+                      : DesignColors.borderDark,
+                ),
+              ),
+              child: Text(
+                isAttached ? 'Attached' : 'Detached',
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: isAttached
+                      ? const Color(0xFF4ADE80)
+                      : DesignColors.textMuted,
+                ),
               ),
             ),
           ],
