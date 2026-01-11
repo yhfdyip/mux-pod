@@ -1,8 +1,17 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xterm/xterm.dart';
 
+import '../../providers/connection_provider.dart';
+import '../../providers/ssh_provider.dart';
+import '../../providers/tmux_provider.dart';
+import '../../services/ssh/ssh_client.dart';
+import '../../services/tmux/tmux_commands.dart';
+import '../../services/tmux/tmux_parser.dart';
 import '../../theme/design_colors.dart';
 import '../../widgets/special_keys_bar.dart';
 
@@ -24,69 +33,238 @@ class TerminalScreen extends ConsumerStatefulWidget {
 class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   late Terminal _terminal;
   final _terminalController = TerminalController();
-  final String _currentSession = 'ses-01';
-  final String _currentWindow = 'logs';
-  final int _latency = 12;
+  final _secureStorage = const FlutterSecureStorage();
+
+  // 接続状態
+  bool _isConnecting = false;
+  String? _connectionError;
+
+  // UI表示用（後でtmux状態から取得）
+  String _currentSession = '';
+  String _currentWindow = '';
+  int _latency = 0;
 
   @override
   void initState() {
     super.initState();
     _terminal = Terminal(maxLines: 10000);
+    // ターミナルリサイズ時のハンドラ設定
+    _terminal.onResize = _onTerminalResize;
     _connectAndAttach();
   }
 
+  /// ターミナルリサイズハンドラ
+  void _onTerminalResize(int cols, int rows, int pixelWidth, int pixelHeight) {
+    final sshState = ref.read(sshProvider);
+    if (sshState.isConnected) {
+      ref.read(sshProvider.notifier).resize(cols, rows);
+    }
+  }
+
   Future<void> _connectAndAttach() async {
-    // TODO: SSH接続してtmuxにアタッチ
-    // デモ用にサンプルテキストを表示
-    _terminal.write('\x1b[32muser@prod-01\x1b[0m:\x1b[34m~\x1b[0m\$ tail -f /var/log/nginx/access.log\r\n');
-    _terminal.write('127.0.0.1 - - [10/Jan/2024:14:32:01 +0000] "GET /api/v1/status HTTP/1.1" 200 132\r\n');
-    _terminal.write('127.0.0.1 - - [10/Jan/2024:14:32:05 +0000] "POST /auth/login HTTP/1.1" 200 456\r\n');
-    _terminal.write('\x1b[32muser@prod-01\x1b[0m:\x1b[34m~\x1b[0m\$ ');
+    setState(() {
+      _isConnecting = true;
+      _connectionError = null;
+    });
+
+    try {
+      // 1. 接続情報を取得
+      final connection = ref.read(connectionsProvider.notifier).getById(widget.connectionId);
+      if (connection == null) {
+        throw Exception('Connection not found');
+      }
+
+      // 2. 認証情報を取得
+      final options = await _getAuthOptions(connection);
+
+      // 3. SSH接続
+      final sshNotifier = ref.read(sshProvider.notifier);
+      await sshNotifier.connect(connection, options);
+
+      // 4. イベントハンドラを設定
+      final sshClient = sshNotifier.client;
+      if (sshClient != null) {
+        sshClient.setEventHandlers(SshEvents(
+          onData: (Uint8List data) {
+            _terminal.write(String.fromCharCodes(data));
+          },
+          onClose: _handleDisconnect,
+          onError: _handleError,
+        ));
+      }
+
+      // 5. tmuxセッション一覧を取得
+      final sessionsOutput = await sshClient?.exec(TmuxCommands.listSessions());
+      if (sessionsOutput != null) {
+        final sessions = TmuxParser.parseSessions(sessionsOutput);
+        ref.read(tmuxProvider.notifier).updateSessions(sessions);
+
+        // 6. セッションにアタッチまたは新規作成
+        if (sessions.isNotEmpty) {
+          final sessionName = widget.sessionName ?? sessions.first.name;
+          sshClient?.write('${TmuxCommands.attachSession(sessionName)}\n');
+          ref.read(tmuxProvider.notifier).setActiveSession(sessionName);
+          setState(() {
+            _currentSession = sessionName;
+          });
+        } else {
+          final newSessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
+          sshClient?.write('${TmuxCommands.newSession(name: newSessionName, detached: false)}\n');
+          ref.read(tmuxProvider.notifier).setActiveSession(newSessionName);
+          setState(() {
+            _currentSession = newSessionName;
+          });
+        }
+      }
+
+      setState(() {
+        _isConnecting = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isConnecting = false;
+        _connectionError = e.toString();
+      });
+      _showErrorSnackBar(e.toString());
+    }
+  }
+
+  /// 認証オプションを取得
+  Future<SshConnectOptions> _getAuthOptions(Connection connection) async {
+    if (connection.authMethod == 'key' && connection.keyId != null) {
+      final privateKey = await _secureStorage.read(
+        key: 'ssh_key_${connection.keyId}_private',
+      );
+      final passphrase = await _secureStorage.read(
+        key: 'ssh_key_${connection.keyId}_passphrase',
+      );
+      return SshConnectOptions(privateKey: privateKey, passphrase: passphrase);
+    } else {
+      final password = await _secureStorage.read(
+        key: 'connection_${connection.id}_password',
+      );
+      return SshConnectOptions(password: password);
+    }
+  }
+
+  /// 切断ハンドラ
+  void _handleDisconnect() {
+    if (mounted) {
+      _showErrorSnackBar('Connection closed');
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// エラーハンドラ
+  void _handleError(Object error) {
+    if (mounted) {
+      _showErrorSnackBar('Error: $error');
+    }
+  }
+
+  /// エラーSnackBar表示
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        action: SnackBarAction(
+          label: 'Retry',
+          textColor: Colors.white,
+          onPressed: _connectAndAttach,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _terminalController.dispose();
+    // SSH接続をクリーンアップ
+    ref.read(sshProvider.notifier).disconnect();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final sshState = ref.watch(sshProvider);
+
     return Scaffold(
       backgroundColor: DesignColors.backgroundDark,
-      body: Column(
+      body: Stack(
         children: [
-          _buildBreadcrumbHeader(),
-          Expanded(
-            child: Stack(
-              children: [
-                TerminalView(
-                  _terminal,
-                  controller: _terminalController,
-                  autofocus: true,
-                  backgroundOpacity: 1.0,
-                  theme: _buildTerminalTheme(),
-                  textStyle: TerminalStyle.fromTextStyle(
-                    GoogleFonts.jetBrainsMono(
-                      fontSize: 12,
-                      height: 1.4,
+          Column(
+            children: [
+              _buildBreadcrumbHeader(),
+              Expanded(
+                child: Stack(
+                  children: [
+                    TerminalView(
+                      _terminal,
+                      controller: _terminalController,
+                      autofocus: true,
+                      backgroundOpacity: 1.0,
+                      theme: _buildTerminalTheme(),
+                      textStyle: TerminalStyle.fromTextStyle(
+                        GoogleFonts.jetBrainsMono(
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
                     ),
-                  ),
+                    // Pane indicator (右上)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: _buildPaneIndicator(),
+                    ),
+                  ],
                 ),
-                // Pane indicator (右上)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: _buildPaneIndicator(),
-                ),
-              ],
+              ),
+              SpecialKeysBar(
+                onKeyPressed: _sendKey,
+                onInputTap: _showInputDialog,
+              ),
+            ],
+          ),
+          // ローディングオーバーレイ
+          if (_isConnecting || sshState.isConnecting)
+            Container(
+              color: Colors.black54,
+              child: const Center(
+                child: CircularProgressIndicator(),
+              ),
             ),
-          ),
-          SpecialKeysBar(
-            onKeyPressed: _sendKey,
-            onInputTap: _showInputDialog,
-          ),
+          // エラーオーバーレイ
+          if (_connectionError != null || sshState.hasError)
+            _buildErrorOverlay(sshState.error ?? _connectionError),
         ],
+      ),
+    );
+  }
+
+  /// エラーオーバーレイ
+  Widget _buildErrorOverlay(String? error) {
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              error ?? 'Connection error',
+              style: const TextStyle(color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _connectAndAttach,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -284,8 +462,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   void _sendKey(String key) {
-    // TODO: SSH経由でキーを送信
-    _terminal.write(key);
+    final sshState = ref.read(sshProvider);
+    if (sshState.isConnected) {
+      ref.read(sshProvider.notifier).write(key);
+    }
+    // ローカルエコーは不要（サーバーから返ってくる）
   }
 
   void _showInputDialog() {
@@ -340,7 +521,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               ),
               onSubmitted: (value) {
                 if (value.isNotEmpty) {
-                  _terminal.write('$value\r\n');
+                  _sendKey('$value\r');
                 }
                 Navigator.pop(context);
               },
@@ -350,7 +531,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
               onPressed: () {
                 final value = controller.text;
                 if (value.isNotEmpty) {
-                  _terminal.write('$value\r\n');
+                  _sendKey('$value\r');
                 }
                 Navigator.pop(context);
               },
