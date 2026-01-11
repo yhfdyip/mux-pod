@@ -104,3 +104,15 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+  fonts:
+    - family: HackGenConsole
+      fonts:
+        - asset: assets/fonts/HackGenConsole-Regular.ttf
+        - asset: assets/fonts/HackGenConsole-Bold.ttf
+          weight: 700
+    - family: UDEVGothicNF
+      fonts:
+        - asset: assets/fonts/UDEVGothicNF-Regular.ttf
+        - asset: assets/fonts/UDEVGothicNF-Bold.ttf
+          weight: 700

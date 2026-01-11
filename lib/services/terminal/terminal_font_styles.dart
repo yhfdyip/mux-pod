@@ -3,9 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// ターミナル用等幅フォントスタイル
 ///
-/// Google Fontsの等幅フォントを統一的に取得する。
+/// Google Fontsの等幅フォントおよびバンドルされた日本語対応フォントを
+/// 統一的に取得する。
 class TerminalFontStyles {
   TerminalFontStyles._();
+
+  /// バンドルフォント（日本語対応）のファミリー名
+  static const List<String> _bundledFontFamilies = [
+    'HackGen Console',
+    'UDEV Gothic NF',
+  ];
 
   /// サポートするフォントファミリーのリスト
   static const List<String> supportedFontFamilies = [
@@ -15,12 +22,20 @@ class TerminalFontStyles {
     'Roboto Mono',
     'Ubuntu Mono',
     'Inconsolata',
+    'HackGen Console',
+    'UDEV Gothic NF',
   ];
 
   /// デフォルトのフォントファミリー
   static const String defaultFontFamily = 'JetBrains Mono';
 
-  /// フォントファミリー名からGoogle FontsのTextStyleを取得
+  /// 表示名からバンドルフォント名へのマッピング
+  static const Map<String, String> _bundledFontMap = {
+    'HackGen Console': 'HackGenConsole',
+    'UDEV Gothic NF': 'UDEVGothicNF',
+  };
+
+  /// フォントファミリー名からTextStyleを取得
   ///
   /// [fontFamily] フォントファミリー名
   /// [fontSize] フォントサイズ
@@ -40,6 +55,21 @@ class TerminalFontStyles {
     FontStyle? fontStyle,
     TextDecoration? decoration,
   }) {
+    // バンドルフォント（日本語対応）の場合
+    if (_bundledFontFamilies.contains(fontFamily)) {
+      return TextStyle(
+        fontFamily: _bundledFontMap[fontFamily],
+        fontSize: fontSize,
+        height: height,
+        color: color,
+        backgroundColor: backgroundColor,
+        fontWeight: fontWeight,
+        fontStyle: fontStyle,
+        decoration: decoration,
+      );
+    }
+
+    // Google Fontsの場合
     switch (fontFamily) {
       case 'JetBrains Mono':
         return GoogleFonts.jetBrainsMono(
