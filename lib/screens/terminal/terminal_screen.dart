@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -928,6 +929,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
   void _showInputDialog() {
     final controller = TextEditingController();
+    final focusNode = FocusNode();
 
     showModalBottomSheet(
       context: context,
@@ -936,84 +938,34 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-          left: 16,
-          right: 16,
-          top: 16,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Enter Command',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              style: GoogleFonts.jetBrainsMono(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Type your command...',
-                hintStyle: GoogleFonts.jetBrainsMono(
-                  color: DesignColors.textMuted,
-                ),
-                filled: true,
-                fillColor: DesignColors.inputDark,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: DesignColors.primary),
-                ),
-              ),
-              onSubmitted: (value) async {
-                if (value.isNotEmpty) {
-                  await _sendKey(value);
-                  await _sendSpecialKey('Enter');
-                }
-                if (context.mounted) Navigator.pop(context);
-              },
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () async {
-                final value = controller.text;
-                if (value.isNotEmpty) {
-                  await _sendKey(value);
-                  await _sendSpecialKey('Enter');
-                }
-                if (context.mounted) Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: DesignColors.primary,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: Text(
-                'Execute',
-                style: GoogleFonts.spaceGrotesk(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-        ),
+      builder: (context) => _InputDialogContent(
+        controller: controller,
+        focusNode: focusNode,
+        onSend: (value) async {
+          await _sendMultilineText(value);
+          if (context.mounted) Navigator.pop(context);
+        },
       ),
     );
+  }
+
+  /// 複数行テキストを送信（各行ごとにテキスト+Enterを送信）
+  Future<void> _sendMultilineText(String text) async {
+    final lines = text.split('\n');
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.isNotEmpty) {
+        await _sendKey(line);
+      }
+      // 最後の行以外はEnterを送信、または空行でもEnterを送信
+      if (i < lines.length - 1 || line.isEmpty) {
+        await _sendSpecialKey('Enter');
+      }
+    }
+    // 最後の行が空でなければEnterを送信
+    if (lines.isNotEmpty && lines.last.isNotEmpty) {
+      await _sendSpecialKey('Enter');
+    }
   }
 
   /// 右上のペインインジケーター
@@ -1233,5 +1185,209 @@ class _PaneLayoutPainter extends CustomPainter {
     return panes != oldDelegate.panes ||
         activePaneId != oldDelegate.activePaneId ||
         activeColor != oldDelegate.activeColor;
+  }
+}
+
+/// 入力ダイアログのコンテンツ（複数行対応、Shift+Enterで改行）
+class _InputDialogContent extends StatefulWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final Future<void> Function(String value) onSend;
+
+  const _InputDialogContent({
+    required this.controller,
+    required this.focusNode,
+    required this.onSend,
+  });
+
+  @override
+  State<_InputDialogContent> createState() => _InputDialogContentState();
+}
+
+class _InputDialogContentState extends State<_InputDialogContent> {
+  bool _isSending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // キーイベントをハンドルするためにonKeyEventを設定
+    widget.focusNode.onKeyEvent = _handleKeyEvent;
+    // 自動フォーカス
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.onKeyEvent = null;
+    widget.focusNode.dispose();
+    super.dispose();
+  }
+
+  /// キーイベントをハンドル（Shift+Enterで改行、Enterで送信）
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+      final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+      if (isShiftPressed) {
+        // Shift+Enter: 改行を挿入
+        _insertNewline();
+        return KeyEventResult.handled;
+      } else {
+        // Enterのみ: 送信
+        _handleSend();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// 現在のカーソル位置に改行を挿入
+  void _insertNewline() {
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final newText = text.replaceRange(selection.start, selection.end, '\n');
+    widget.controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: selection.start + 1),
+    );
+  }
+
+  Future<void> _handleSend() async {
+    if (_isSending) return;
+    setState(() => _isSending = true);
+    try {
+      await widget.onSend(widget.controller.text);
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Enter Command',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: DesignColors.keyBackground,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'Shift+Enter: 改行',
+                  style: GoogleFonts.jetBrainsMono(
+                    fontSize: 10,
+                    color: DesignColors.textMuted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: widget.controller,
+            focusNode: widget.focusNode,
+            maxLines: null,
+            minLines: 1,
+            keyboardType: TextInputType.multiline,
+            style: GoogleFonts.jetBrainsMono(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Type your command... (Enter to send)',
+              hintStyle: GoogleFonts.jetBrainsMono(
+                color: DesignColors.textMuted,
+              ),
+              filled: true,
+              fillColor: DesignColors.inputDark,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: DesignColors.primary),
+              ),
+              contentPadding: const EdgeInsets.all(16),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: _isSending ? null : _handleSend,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: DesignColors.primary,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _isSending
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.black,
+                          ),
+                        )
+                      : Text(
+                          'Execute',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
   }
 }
