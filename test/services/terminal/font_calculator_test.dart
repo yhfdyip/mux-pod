@@ -237,5 +237,243 @@ void main() {
         expect(width20, greaterThan(width14));
       });
     });
+
+    group('getCharDisplayWidth', () {
+      test('returns 1 for ASCII characters', () {
+        expect(FontCalculator.getCharDisplayWidth('a'.codeUnitAt(0)), equals(1));
+        expect(FontCalculator.getCharDisplayWidth('Z'.codeUnitAt(0)), equals(1));
+        expect(FontCalculator.getCharDisplayWidth('0'.codeUnitAt(0)), equals(1));
+        expect(FontCalculator.getCharDisplayWidth('!'.codeUnitAt(0)), equals(1));
+        expect(FontCalculator.getCharDisplayWidth(' '.codeUnitAt(0)), equals(1));
+      });
+
+      test('returns 2 for Japanese hiragana', () {
+        expect(FontCalculator.getCharDisplayWidth('あ'.codeUnitAt(0)), equals(2));
+        expect(FontCalculator.getCharDisplayWidth('い'.codeUnitAt(0)), equals(2));
+        expect(FontCalculator.getCharDisplayWidth('う'.codeUnitAt(0)), equals(2));
+      });
+
+      test('returns 2 for Japanese katakana', () {
+        expect(FontCalculator.getCharDisplayWidth('ア'.codeUnitAt(0)), equals(2));
+        expect(FontCalculator.getCharDisplayWidth('イ'.codeUnitAt(0)), equals(2));
+      });
+
+      test('returns 2 for CJK ideographs (kanji)', () {
+        expect(FontCalculator.getCharDisplayWidth('漢'.codeUnitAt(0)), equals(2));
+        expect(FontCalculator.getCharDisplayWidth('字'.codeUnitAt(0)), equals(2));
+      });
+
+      test('returns 2 for fullwidth characters', () {
+        // Fullwidth asterisk U+FF0A
+        expect(FontCalculator.getCharDisplayWidth(0xFF0A), equals(2));
+        // Fullwidth A U+FF21
+        expect(FontCalculator.getCharDisplayWidth(0xFF21), equals(2));
+      });
+
+      test('returns 2 for emoji', () {
+        // 💩 U+1F4A9
+        expect(FontCalculator.getCharDisplayWidth(0x1F4A9), equals(2));
+        // 😀 U+1F600
+        expect(FontCalculator.getCharDisplayWidth(0x1F600), equals(2));
+      });
+
+      test('returns 0 for control characters', () {
+        expect(FontCalculator.getCharDisplayWidth(0x00), equals(0)); // NUL
+        expect(FontCalculator.getCharDisplayWidth(0x1F), equals(0)); // Unit Separator
+        expect(FontCalculator.getCharDisplayWidth(0x7F), equals(0)); // DEL
+      });
+
+      test('returns 0 for variation selectors', () {
+        // VS16 U+FE0F (emoji style)
+        expect(FontCalculator.getCharDisplayWidth(0xFE0F), equals(0));
+        // VS15 U+FE0E (text style)
+        expect(FontCalculator.getCharDisplayWidth(0xFE0E), equals(0));
+      });
+
+      test('returns 0 for zero-width joiners', () {
+        // ZWJ U+200D
+        expect(FontCalculator.getCharDisplayWidth(0x200D), equals(0));
+        // ZWNJ U+200C
+        expect(FontCalculator.getCharDisplayWidth(0x200C), equals(0));
+      });
+
+      test('returns 0 for combining marks', () {
+        // Combining Acute Accent U+0301
+        expect(FontCalculator.getCharDisplayWidth(0x0301), equals(0));
+      });
+    });
+
+    group('getTextDisplayWidth', () {
+      test('calculates width for ASCII text', () {
+        expect(FontCalculator.getTextDisplayWidth('hello'), equals(5));
+        expect(FontCalculator.getTextDisplayWidth('abc123'), equals(6));
+      });
+
+      test('calculates width for Japanese text', () {
+        expect(FontCalculator.getTextDisplayWidth('あいうえお'), equals(10));
+      });
+
+      test('calculates width for mixed text', () {
+        // 'aあb' = 1 + 2 + 1 = 4
+        expect(FontCalculator.getTextDisplayWidth('aあb'), equals(4));
+      });
+
+      test('calculates width for emoji with VS16', () {
+        // ✡️ = U+2721 (width 2 because followed by VS16) + U+FE0F (width 0) = 2
+        expect(FontCalculator.getTextDisplayWidth('✡️'), equals(2));
+      });
+
+      test('calculates width for complex emoji text', () {
+        // ＊✡️💩aaあいうえお
+        // ＊ (U+FF0A) = 2
+        // ✡️ (U+2721 + U+FE0F) = 2 + 0 = 2
+        // 💩 (U+1F4A9) = 2
+        // aa = 2
+        // あいうえお = 10
+        // Total = 2 + 2 + 2 + 2 + 10 = 18
+        expect(FontCalculator.getTextDisplayWidth('＊✡️💩aaあいうえお'), equals(18));
+      });
+
+      test('returns 0 for empty string', () {
+        expect(FontCalculator.getTextDisplayWidth(''), equals(0));
+      });
+    });
+
+    group('columnToCharOffset', () {
+      test('converts column position for ASCII text', () {
+        const text = 'hello';
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));
+        expect(FontCalculator.columnToCharOffset(text, 1), equals(1));
+        expect(FontCalculator.columnToCharOffset(text, 3), equals(3));
+        expect(FontCalculator.columnToCharOffset(text, 5), equals(5));
+      });
+
+      test('converts column position for Japanese text', () {
+        const text = 'あいう'; // Each character is 2 columns, 1 code unit each
+        // Column 0 -> code unit 0
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));
+        // Column 2 -> code unit 1 (after 'あ')
+        expect(FontCalculator.columnToCharOffset(text, 2), equals(1));
+        // Column 4 -> code unit 2 (after 'い')
+        expect(FontCalculator.columnToCharOffset(text, 4), equals(2));
+        // Column 6 -> code unit 3 (after 'う')
+        expect(FontCalculator.columnToCharOffset(text, 6), equals(3));
+      });
+
+      test('converts column position for mixed text', () {
+        const text = 'aあb'; // 1 + 2 + 1 = 4 columns
+        // Column 0 -> code unit 0
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));
+        // Column 1 -> code unit 1 (after 'a')
+        expect(FontCalculator.columnToCharOffset(text, 1), equals(1));
+        // Column 3 -> code unit 2 (after 'あ')
+        expect(FontCalculator.columnToCharOffset(text, 3), equals(2));
+        // Column 4 -> code unit 3 (after 'b')
+        expect(FontCalculator.columnToCharOffset(text, 4), equals(3));
+      });
+
+      test('converts column position with emoji and VS16', () {
+        const text = '✡️a'; // ✡️ (2 columns) + a (1 column) = 3 columns
+        // ✡ (U+2721) = 1 code unit, VS16 (U+FE0F) = 1 code unit, a = 1 code unit
+        // Column 0 -> code unit 0
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));
+        // Column 2 -> code unit 2 (after ✡️)
+        expect(FontCalculator.columnToCharOffset(text, 2), equals(2));
+        // Column 3 -> code unit 3 (after 'a')
+        expect(FontCalculator.columnToCharOffset(text, 3), equals(3));
+      });
+
+      test('handles surrogate pair emoji correctly', () {
+        // 💩 (U+1F4A9) is a surrogate pair = 2 code units
+        const text = 'a💩b';
+        // a = 1 code unit, 💩 = 2 code units, b = 1 code unit
+        // Columns: a(1) + 💩(2) + b(1) = 4 columns
+        // Column 0 -> code unit 0
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));
+        // Column 1 -> code unit 1 (after 'a')
+        expect(FontCalculator.columnToCharOffset(text, 1), equals(1));
+        // Column 3 -> code unit 3 (after 💩, which is 2 code units)
+        expect(FontCalculator.columnToCharOffset(text, 3), equals(3));
+        // Column 4 -> code unit 4 (after 'b')
+        expect(FontCalculator.columnToCharOffset(text, 4), equals(4));
+      });
+
+      test('handles complex emoji text correctly', () {
+        const text = '＊✡️💩aaあいうえお';
+        // Code units:
+        // ＊ (U+FF0A): 1 code unit, 2 columns -> cu 0-0
+        // ✡ (U+2721): 1 code unit, 2 columns -> cu 1
+        // VS16 (U+FE0F): 1 code unit, 0 columns -> cu 2
+        // 💩 (U+1F4A9): 2 code units, 2 columns -> cu 3-4
+        // a: 1 code unit, 1 column -> cu 5
+        // a: 1 code unit, 1 column -> cu 6
+        // あ: 1 code unit, 2 columns -> cu 7
+        // い: 1 code unit, 2 columns -> cu 8
+        // う: 1 code unit, 2 columns -> cu 9
+        // え: 1 code unit, 2 columns -> cu 10
+        // お: 1 code unit, 2 columns -> cu 11
+
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));  // Start
+        expect(FontCalculator.columnToCharOffset(text, 2), equals(1));  // After ＊, start of ✡
+        expect(FontCalculator.columnToCharOffset(text, 4), equals(3));  // After ✡️, start of 💩
+        expect(FontCalculator.columnToCharOffset(text, 6), equals(5));  // After 💩, start of first 'a'
+        expect(FontCalculator.columnToCharOffset(text, 8), equals(7));  // After 'aa', start of 'あ'
+        expect(FontCalculator.columnToCharOffset(text, 18), equals(12)); // End of text
+      });
+
+      test('handles text with multiple surrogate pairs', () {
+        const text = '💩💩a'; // 2 + 2 + 1 = 5 columns, 2 + 2 + 1 = 5 code units
+        expect(FontCalculator.columnToCharOffset(text, 0), equals(0));
+        expect(FontCalculator.columnToCharOffset(text, 2), equals(2)); // After first 💩
+        expect(FontCalculator.columnToCharOffset(text, 4), equals(4)); // After second 💩
+        expect(FontCalculator.columnToCharOffset(text, 5), equals(5)); // After 'a'
+      });
+
+      test('returns 0 for empty string', () {
+        expect(FontCalculator.columnToCharOffset('', 0), equals(0));
+        expect(FontCalculator.columnToCharOffset('', 5), equals(0));
+      });
+    });
+
+    group('getCharDisplayWidthWithContext', () {
+      test('returns 2 for emoji-eligible character followed by VS16', () {
+        // ✡ (U+2721) followed by VS16 should be width 2
+        expect(
+          FontCalculator.getCharDisplayWidthWithContext(0x2721, 0xFE0F),
+          equals(2),
+        );
+      });
+
+      test('returns base width when not followed by VS16', () {
+        // ✡ (U+2721) alone should be width 1
+        expect(
+          FontCalculator.getCharDisplayWidthWithContext(0x2721, null),
+          equals(1),
+        );
+        expect(
+          FontCalculator.getCharDisplayWidthWithContext(0x2721, 'a'.codeUnitAt(0)),
+          equals(1),
+        );
+      });
+
+      test('returns 0 for VS16 itself', () {
+        expect(
+          FontCalculator.getCharDisplayWidthWithContext(0xFE0F, null),
+          equals(0),
+        );
+      });
+
+      test('returns 2 for already wide character regardless of VS16', () {
+        // 💩 (U+1F4A9) is already width 2
+        expect(
+          FontCalculator.getCharDisplayWidthWithContext(0x1F4A9, null),
+          equals(2),
+        );
+        expect(
+          FontCalculator.getCharDisplayWidthWithContext(0x1F4A9, 0xFE0F),
+          equals(2),
+        );
+      });
+    });
   });
 }

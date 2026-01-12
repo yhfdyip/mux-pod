@@ -379,22 +379,29 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
                 textScaler: TextScaler.noScaling,
               )..layout();
 
-              // 行のテキスト長
-              final lineTextLength = line.segments.map((s) => s.text).join().length;
+              // 行のプレーンテキストを取得
+              final lineText = line.segments.map((s) => s.text).join();
+              final lineTextLength = lineText.length;
 
-              if (widget.cursorX <= lineTextLength) {
+              // 全角文字を考慮してカラム位置を文字オフセットに変換
+              // tmuxのcursor_xはカラム位置（全角=2）だが、
+              // TextPositionは文字オフセット（全角=1）を期待する
+              final lineDisplayWidth = FontCalculator.getTextDisplayWidth(lineText);
+              final charOffset = FontCalculator.columnToCharOffset(lineText, widget.cursorX);
+
+              if (widget.cursorX <= lineDisplayWidth) {
                  // カーソルが行内にある場合、getOffsetForCaretで位置を取得
                  final offset = painter.getOffsetForCaret(
-                   TextPosition(offset: widget.cursorX),
+                   TextPosition(offset: charOffset),
                    Rect.zero,
                  );
                  cursorLeft = offset.dx;
 
                  // カーソル幅も現在の文字の位置から取得（次の文字までの幅）
                  // 行末の場合は標準幅を使用
-                 if (widget.cursorX < lineTextLength) {
+                 if (charOffset < lineTextLength) {
                     final nextOffset = painter.getOffsetForCaret(
-                      TextPosition(offset: widget.cursorX + 1),
+                      TextPosition(offset: charOffset + 1),
                       Rect.zero,
                     );
                     charWidth = nextOffset.dx - offset.dx;
@@ -406,7 +413,7 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
                  // 行末の位置を取得し、超過分を加算
                  cursorLeft = painter.width;
                  charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
-                 cursorLeft += (widget.cursorX - lineTextLength) * charWidth;
+                 cursorLeft += (widget.cursorX - lineDisplayWidth) * charWidth;
               }
 
               lineWidget = Stack(
