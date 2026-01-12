@@ -359,41 +359,56 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
             if (index == cursorLineIndex && widget.mode == TerminalMode.normal) {
               final lineText = line.segments.map((s) => s.text).join();
               
-              // カーソル位置(cursorX)までの部分文字列の幅を直接測定
-              // これにより、文字幅の累積誤差やプロポーショナルフォント混入時のズレを完全に解消
               double cursorLeft;
-              double charWidth; // カーソルの幅用
+              double charWidth;
 
               if (lineText.isNotEmpty && widget.cursorX <= lineText.length) {
-                 // cursorXまでの文字列幅を測定
-                 final textToCursor = lineText.substring(0, widget.cursorX);
+                 // cursorXまでのセグメントを抽出してTextSpanを構築
+                 // スタイル（太字など）を含めた正確な幅を測定する
+                 final segmentsToCursor = <AnsiSegment>[];
+                 int currentLen = 0;
+                 for (final segment in line.segments) {
+                   if (currentLen + segment.text.length <= widget.cursorX) {
+                     segmentsToCursor.add(segment);
+                     currentLen += segment.text.length;
+                   } else {
+                     final take = widget.cursorX - currentLen;
+                     if (take > 0) {
+                       segmentsToCursor.add(AnsiSegment(
+                         segment.text.substring(0, take),
+                         segment.style,
+                       ));
+                     }
+                     break;
+                   }
+                 }
+
+                 final textSpanToCursor = _parser.toTextSpan(
+                   segmentsToCursor,
+                   fontSize: fontSize,
+                   fontFamily: settings.fontFamily,
+                 );
+
                  final painter = TextPainter(
-                    text: TextSpan(
-                      text: textToCursor,
-                      style: TerminalFontStyles.getTextStyle(
-                        settings.fontFamily,
-                        fontSize: fontSize,
-                      ),
-                    ),
+                    text: textSpanToCursor,
                     textDirection: TextDirection.ltr,
                     textScaler: TextScaler.noScaling,
                  )..layout();
                  cursorLeft = painter.width;
 
-                 // カーソル自体の幅（次の1文字分、または標準幅）
                  charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
               } else {
                  // 行末以降、または空行の場合
-                 // まず行全体の幅を測定
                  if (lineText.isNotEmpty) {
+                    // 行全体の幅を測定（スタイル込み）
+                    final textSpanFull = _parser.lineToTextSpan(
+                      line,
+                      fontSize: fontSize,
+                      fontFamily: settings.fontFamily,
+                    );
+                    
                     final painter = TextPainter(
-                      text: TextSpan(
-                        text: lineText,
-                        style: TerminalFontStyles.getTextStyle(
-                          settings.fontFamily,
-                          fontSize: fontSize,
-                        ),
-                      ),
+                      text: textSpanFull,
                       textDirection: TextDirection.ltr,
                       textScaler: TextScaler.noScaling,
                     )..layout();
