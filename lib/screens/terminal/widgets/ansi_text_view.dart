@@ -351,6 +351,7 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
               final cursorLeft = widget.cursorX * charWidth;
 
               lineWidget = Stack(
+                clipBehavior: Clip.none,
                 children: [
                   lineWidget,
                   Positioned(

@@ -1,6 +1,7 @@
 import 'dart:developer' as developer;
 
 import 'package:flutter/painting.dart';
+import 'terminal_font_styles.dart';
 
 /// フォントサイズ計算結果
 typedef FontCalculateResult = ({double fontSize, bool needsScroll});
@@ -103,7 +104,7 @@ class FontCalculator {
     final painter = TextPainter(
       text: TextSpan(
         text: 'M', // 等幅フォントの代表文字
-        style: TextStyle(fontFamily: fontFamily, fontSize: baseFontSize),
+        style: TerminalFontStyles.getTextStyle(fontFamily, fontSize: baseFontSize),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
