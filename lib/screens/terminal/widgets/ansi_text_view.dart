@@ -413,15 +413,20 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerPro
                   AnimatedBuilder(
                     animation: _caretBlinkController,
                     builder: (context, child) {
+                      // キャレットの高さを文字サイズに合わせる（行間を含めない）
+                      final caretHeight = fontSize;
+                      // 行内で垂直方向に中央寄せ
+                      final caretTop = (_lineHeight - caretHeight) / 2;
+                      
                       return Positioned(
                         left: cursorLeft,
-                        top: 0,
-                        width: 2, // 細い線に変更
-                        height: _lineHeight,
+                        top: caretTop,
+                        width: 2,
+                        height: caretHeight,
                         child: Opacity(
-                          opacity: _caretBlinkController.value > 0.5 ? 1.0 : 0.0, // 500msで点滅
+                          opacity: _caretBlinkController.value, // フェードイン・アウト
                           child: Container(
-                            color: DesignColors.primary, // primary色に変更
+                            color: DesignColors.primary,
                           ),
                         ),
                       );
