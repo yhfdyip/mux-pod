@@ -226,11 +226,6 @@ class TmuxCommands {
     return 'tmux send-keys -t ${_escapeArg(paneId)} Escape';
   }
 
-  /// カーソル位置とペインサイズを取得
-  static String getCursorPosition(String target) {
-    return 'tmux display-message -p -t ${_escapeArg(target)} "#{cursor_x},#{cursor_y},#{pane_width},#{pane_height}"';
-  }
-
   // ===== ペインコンテンツ =====
 
   /// ペインの内容をキャプチャ（ANSIエスケープ付き）

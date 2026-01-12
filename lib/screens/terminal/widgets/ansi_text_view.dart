@@ -7,7 +7,6 @@ import '../../../services/terminal/ansi_parser.dart';
 import '../../../services/terminal/font_calculator.dart';
 import '../../../services/terminal/terminal_diff.dart';
 import '../../../services/terminal/terminal_font_styles.dart';
-import '../../../theme/design_colors.dart';
 
 /// キー入力イベント
 class KeyInputEvent {
@@ -72,12 +71,6 @@ class AnsiTextView extends ConsumerStatefulWidget {
   /// 外部から渡される垂直スクロールコントローラー（オプション）
   final ScrollController? verticalScrollController;
 
-  /// カーソルX位置（0-based）
-  final int cursorX;
-
-  /// カーソルY位置（0-based, ペイン上部基準）
-  final int cursorY;
-
   const AnsiTextView({
     super.key,
     required this.text,
@@ -90,15 +83,13 @@ class AnsiTextView extends ConsumerStatefulWidget {
     this.zoomEnabled = true,
     this.onZoomChanged,
     this.verticalScrollController,
-    this.cursorX = 0,
-    this.cursorY = 0,
   });
 
   @override
   ConsumerState<AnsiTextView> createState() => AnsiTextViewState();
 }
 
-class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerProviderStateMixin {
+class AnsiTextViewState extends ConsumerState<AnsiTextView> {
   final FocusNode _focusNode = FocusNode();
   final ScrollController _horizontalScrollController = ScrollController();
   ScrollController? _internalVerticalScrollController;
@@ -135,9 +126,6 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerPro
   /// 最後の差分結果（適応型ポーリング用）
   DiffResult? _lastDiffResult;
 
-  /// キャレット点滅用コントローラー
-  late final AnimationController _caretBlinkController;
-
   @override
   void initState() {
     super.initState();
@@ -149,12 +137,6 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerPro
       defaultForeground: widget.foregroundColor,
       defaultBackground: widget.backgroundColor,
     );
-    
-    // 500ms周期で点滅（1秒で1サイクル）
-    _caretBlinkController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    )..repeat(reverse: true);
   }
 
   @override
@@ -223,7 +205,6 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerPro
 
   @override
   void dispose() {
-    _caretBlinkController.dispose();
     _focusNode.dispose();
     _horizontalScrollController.dispose();
     // 内部で作成した場合のみ破棄
@@ -315,7 +296,6 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerPro
         // 仮想スクロール対応のListView.builder
         Widget listWidget = ListView.builder(
           controller: _verticalScrollController,
-          padding: EdgeInsets.zero, // パディングを明示的にゼロにする
           physics: const ClampingScrollPhysics(),
           itemCount: parsedLines.length,
           // 固定の行高さを使用してスクロール計算を高速化
@@ -339,7 +319,6 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> with SingleTickerPro
                 height: 1.4,
                 color: widget.foregroundColor,
               ),
-              textScaler: TextScaler.noScaling,
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.visible,

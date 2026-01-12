@@ -106,6 +106,7 @@ class TmuxPane {
 - flutter_secure_storage (SSH鍵/パスワード), shared_preferences (接続設定)
 - cryptography, pointycastle (SSH鍵生成)
 - flutter_local_notifications, url_launcher (設定/通知)
+- Dart 3.x / Flutter 3.24+ + flutter_riverpod (状態管理), xterm (ターミナル表示), dartssh2 (SSH接続) (001-terminal-width-resize)
 
 ## Recent Changes
 - 001-ssh-terminal-integration: SSH接続・tmuxアタッチ・キー送信の実装
