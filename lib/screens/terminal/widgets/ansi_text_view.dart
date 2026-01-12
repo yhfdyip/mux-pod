@@ -346,8 +346,8 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
 
             // 現在の行がカーソル位置と一致する場合、Stackでカーソルを重ねる
             if (index == cursorLineIndex && widget.mode == TerminalMode.normal) {
-              final charWidthRatio = FontCalculator.measureCharWidthRatio(settings.fontFamily);
-              final charWidth = fontSize * charWidthRatio;
+              // 正確な文字幅を測定（ヒンティング対応のためratioではなく直接測定）
+              final charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
               final cursorLeft = widget.cursorX * charWidth;
 
               lineWidget = Stack(

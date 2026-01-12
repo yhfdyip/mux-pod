@@ -93,6 +93,7 @@ class FontCalculator {
   ///
   /// 等幅フォントでは、1文字の幅 = fontSize × charWidthRatio
   /// 基準フォントサイズ100で測定し、比率を返す。
+  /// 精度向上のため、10文字分の幅を測定して平均を取る。
   static double measureCharWidthRatio(String fontFamily) {
     // キャッシュから取得
     if (_charWidthRatioCache.containsKey(fontFamily)) {
@@ -100,16 +101,24 @@ class FontCalculator {
     }
 
     const baseFontSize = 100.0;
+    // 等幅フォントでも数字とアルファベットで微妙にメトリクスが異なる場合があるため、
+    // 典型的なパターンを含めて平均を取る
+    const testString = '0123456789';
 
     final painter = TextPainter(
       text: TextSpan(
-        text: 'M', // 等幅フォントの代表文字
+        text: testString,
         style: TerminalFontStyles.getTextStyle(fontFamily, fontSize: baseFontSize),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final ratio = painter.width / baseFontSize;
+    // 平均幅を算出
+    // 0.8文字分左にずれる（charWidthが小さい）という報告があるため、
+    // 計算結果が小さくなりすぎないよう、ごくわずかなバッファ(0.01%)を持たせるか検討したが、
+    // そもそも 'M' (幅広) だけでなく '0' (標準的) も含めることで自然に補正されることを期待。
+    // それでも足りない場合はオフセット調整が必要だが、まずは測定文字種の変更で対応。
+    final ratio = (painter.width / testString.length) / baseFontSize;
 
     // キャッシュに保存
     _charWidthRatioCache[fontFamily] = ratio;
@@ -120,6 +129,23 @@ class FontCalculator {
     );
 
     return ratio;
+  }
+
+  /// 指定されたフォントサイズでの正確な文字幅を測定
+  ///
+  /// ヒンティングやピクセルアライメントによる非線形なスケーリングを考慮し、
+  /// 実際に使用するフォントサイズで測定を行う。
+  static double measureCharWidth(String fontFamily, double fontSize) {
+    const testString = '0123456789';
+    final painter = TextPainter(
+      text: TextSpan(
+        text: testString,
+        style: TerminalFontStyles.getTextStyle(fontFamily, fontSize: fontSize),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    return painter.width / testString.length;
   }
 
   /// キャッシュをクリア（テスト用またはフォント変更時）
