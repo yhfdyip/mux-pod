@@ -398,13 +398,33 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       // アンマウント済みならスキップ
       if (!mounted || _isDisposed) return;
 
-      // カーソル位置を更新
+      // カーソル位置とペインサイズを更新
       if (cursorOutput.isNotEmpty) {
         final parts = cursorOutput.trim().split(',');
-        if (parts.length == 2) {
+        if (parts.length >= 4) {
           final x = int.tryParse(parts[0]);
           final y = int.tryParse(parts[1]);
+          final w = int.tryParse(parts[2]);
+          final h = int.tryParse(parts[3]);
           
+          // ペインサイズの更新検知
+          if (w != null && h != null && (w != _paneWidth || h != _paneHeight)) {
+             setState(() {
+               _paneWidth = w;
+               _paneHeight = h;
+             });
+             // フォントサイズ再計算のために通知
+             // updatePaneはTmuxPaneを要求するため、簡易的に作成
+             // 実際にはactivePaneのID等が必要だが、ここではサイズ計算用と割り切る
+             // ただし、IDがないと正しく動かない可能性があるため、現在のactivePaneをコピーしてサイズだけ更新するのが安全
+             final currentActivePane = ref.read(tmuxProvider).activePane;
+             if (currentActivePane != null) {
+               ref.read(terminalDisplayProvider.notifier).updatePane(
+                 currentActivePane.copyWith(width: w, height: h),
+               );
+             }
+          }
+
           final activePaneId = ref.read(tmuxProvider).activePaneId;
           if (activePaneId != null && x != null && y != null) {
              ref.read(tmuxProvider.notifier).updateCursorPosition(activePaneId, x, y);
