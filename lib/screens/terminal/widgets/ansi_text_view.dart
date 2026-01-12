@@ -346,15 +346,6 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
               cursorLineIndex = widget.cursorY;
             }
 
-            // デバッグログ（先頭行のみ）
-            if (index == 0) {
-               debugPrint('--- AnsiTextView Debug ---');
-               debugPrint('cursor: (${widget.cursorX}, ${widget.cursorY}), paneHeight: ${widget.paneHeight}, lines: ${parsedLines.length}');
-               debugPrint('cursorLineIndex: $cursorLineIndex');
-               final w = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
-               debugPrint('charWidth: $w, fontSize: $fontSize');
-            }
-
             // 現在の行がカーソル位置と一致する場合、Stackでカーソルを重ねる
             if (index == cursorLineIndex && widget.mode == TerminalMode.normal) {
               // TextPainter.getOffsetForCaretを使用して、レンダリングエンジンが計算した正確なカーソル位置を取得
