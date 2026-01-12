@@ -304,6 +304,7 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
         // 仮想スクロール対応のListView.builder
         Widget listWidget = ListView.builder(
           controller: _verticalScrollController,
+          padding: EdgeInsets.zero, // パディングを明示的にゼロにする
           physics: const ClampingScrollPhysics(),
           itemCount: parsedLines.length,
           // 固定の行高さを使用してスクロール計算を高速化
@@ -327,6 +328,7 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
                 height: 1.4,
                 color: widget.foregroundColor,
               ),
+              textScaler: TextScaler.noScaling,
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.visible,
@@ -344,11 +346,68 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView> {
               cursorLineIndex = widget.cursorY;
             }
 
+            // デバッグログ（先頭行のみ）
+            if (index == 0) {
+               debugPrint('--- AnsiTextView Debug ---');
+               debugPrint('cursor: (${widget.cursorX}, ${widget.cursorY}), paneHeight: ${widget.paneHeight}, lines: ${parsedLines.length}');
+               debugPrint('cursorLineIndex: $cursorLineIndex');
+               final w = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
+               debugPrint('charWidth: $w, fontSize: $fontSize');
+            }
+
             // 現在の行がカーソル位置と一致する場合、Stackでカーソルを重ねる
             if (index == cursorLineIndex && widget.mode == TerminalMode.normal) {
-              // 正確な文字幅を測定（ヒンティング対応のためratioではなく直接測定）
-              final charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
-              final cursorLeft = widget.cursorX * charWidth;
+              final lineText = line.segments.map((s) => s.text).join();
+              
+              // カーソル位置(cursorX)までの部分文字列の幅を直接測定
+              // これにより、文字幅の累積誤差やプロポーショナルフォント混入時のズレを完全に解消
+              double cursorLeft;
+              double charWidth; // カーソルの幅用
+
+              if (lineText.isNotEmpty && widget.cursorX <= lineText.length) {
+                 // cursorXまでの文字列幅を測定
+                 final textToCursor = lineText.substring(0, widget.cursorX);
+                 final painter = TextPainter(
+                    text: TextSpan(
+                      text: textToCursor,
+                      style: TerminalFontStyles.getTextStyle(
+                        settings.fontFamily,
+                        fontSize: fontSize,
+                      ),
+                    ),
+                    textDirection: TextDirection.ltr,
+                    textScaler: TextScaler.noScaling,
+                 )..layout();
+                 cursorLeft = painter.width;
+
+                 // カーソル自体の幅（次の1文字分、または標準幅）
+                 charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
+              } else {
+                 // 行末以降、または空行の場合
+                 // まず行全体の幅を測定
+                 if (lineText.isNotEmpty) {
+                    final painter = TextPainter(
+                      text: TextSpan(
+                        text: lineText,
+                        style: TerminalFontStyles.getTextStyle(
+                          settings.fontFamily,
+                          fontSize: fontSize,
+                        ),
+                      ),
+                      textDirection: TextDirection.ltr,
+                      textScaler: TextScaler.noScaling,
+                    )..layout();
+                    cursorLeft = painter.width;
+                    
+                    // 行末からの超過分を加算
+                    charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
+                    cursorLeft += (widget.cursorX - lineText.length) * charWidth;
+                 } else {
+                    // 完全な空行
+                    charWidth = FontCalculator.measureCharWidth(settings.fontFamily, fontSize);
+                    cursorLeft = widget.cursorX * charWidth;
+                 }
+              }
 
               lineWidget = Stack(
                 clipBehavior: Clip.none,
