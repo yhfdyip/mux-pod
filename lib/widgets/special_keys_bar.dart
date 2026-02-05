@@ -48,10 +48,36 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
   /// 現在IME変換中かどうか
   bool _isComposing = false;
 
+  /// DirectInputモードでBackspace検出のためのsentinel文字（ゼロ幅スペース）
+  /// iOS/iPadOSではTextField空の状態でBackspace押下時にKeyDownEventが
+  /// 生成されないため、常にsentinelを保持して削除検出でBackspaceを検知する
+  static const String _sentinel = '\u200B';
+
+  /// sentinel リセット中の再入防止フラグ
+  bool _isResettingController = false;
+
   @override
   void initState() {
     super.initState();
+    if (widget.directInputEnabled) {
+      _directInputController.value = TextEditingValue(
+        text: _sentinel,
+        selection: TextSelection.collapsed(offset: _sentinel.length),
+      );
+    }
     _directInputController.addListener(_onDirectInputChanged);
+  }
+
+  @override
+  void didUpdateWidget(SpecialKeysBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.directInputEnabled && !oldWidget.directInputEnabled) {
+      _resetToSentinel();
+    } else if (!widget.directInputEnabled && oldWidget.directInputEnabled) {
+      _isResettingController = true;
+      _directInputController.clear();
+      _isResettingController = false;
+    }
   }
 
   @override
@@ -62,8 +88,11 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
     super.dispose();
   }
 
-  /// DirectInput: IME変換確定時に送信して即座にクリア
+  /// DirectInput: テキスト変更時の処理
+  /// sentinelアプローチでBackspaceを検出（iOS/iPadOS対応）
   void _onDirectInputChanged() {
+    if (_isResettingController) return;
+
     final text = _directInputController.text;
     final value = _directInputController.value;
 
@@ -75,21 +104,31 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
       return;
     }
 
-    // テキストがあれば送信
-    if (text.isNotEmpty) {
+    // Sentinelが削除された = Backspaceが押された（iOS/iPadOS対応）
+    if (text.isEmpty) {
+      _sendDirectBackspace();
+      _resetToSentinel();
+      return;
+    }
+
+    // Sentinelを除去して実際の入力テキストを取得
+    final actualText = text.replaceAll(_sentinel, '');
+
+    // 実際のテキストがあれば送信
+    if (actualText.isNotEmpty) {
       // CTRLボタンが押されている場合はCtrl+キーとして送信
-      if (_ctrlPressed && text.length == 1 && RegExp(r'^[A-Za-z]$').hasMatch(text)) {
+      if (_ctrlPressed && actualText.length == 1 && RegExp(r'^[A-Za-z]$').hasMatch(actualText)) {
         if (widget.hapticFeedback) {
           HapticFeedback.lightImpact();
         }
-        widget.onSpecialKeyPressed('C-${text.toLowerCase()}');
+        widget.onSpecialKeyPressed('C-${actualText.toLowerCase()}');
         setState(() => _ctrlPressed = false);
       } else {
-        widget.onKeyPressed(text);
+        widget.onKeyPressed(actualText);
       }
 
-      // 送信後に即座にクリア
-      _directInputController.clear();
+      // 送信後にsentinelにリセット
+      _resetToSentinel();
     }
   }
 
@@ -99,8 +138,7 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
       HapticFeedback.lightImpact();
     }
     widget.onSpecialKeyPressed('Enter');
-    // 入力欄をクリア（既に_onDirectInputChangedでクリア済みだが念のため）
-    _directInputController.clear();
+    _resetToSentinel();
   }
 
   /// DirectInput: Backspaceキー送信
@@ -109,6 +147,16 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
       HapticFeedback.lightImpact();
     }
     widget.onSpecialKeyPressed('BSpace');
+  }
+
+  /// DirectInput: sentinelにリセット（Backspace検出用）
+  void _resetToSentinel() {
+    _isResettingController = true;
+    _directInputController.value = TextEditingValue(
+      text: _sentinel,
+      selection: TextSelection.collapsed(offset: _sentinel.length),
+    );
+    _isResettingController = false;
   }
 
   /// キーイベントハンドラ（Enter/Backspace/Ctrl+キー等をキャプチャ）
@@ -147,12 +195,10 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
       return KeyEventResult.handled;
     }
 
-    // Backspaceキー（テキストが空の場合のみ送信）
+    // Backspaceキー: sentinelアプローチで_onDirectInputChangedにて処理
+    // フレームワークにsentinel削除を委譲することでiOS/iPadOSでも動作する
     if (event.logicalKey == LogicalKeyboardKey.backspace) {
-      if (_directInputController.text.isEmpty) {
-        _sendDirectBackspace();
-        return KeyEventResult.handled;
-      }
+      return KeyEventResult.ignored;
     }
 
     // Escapeキー
@@ -176,14 +222,13 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
     return KeyEventResult.ignored;
   }
 
-  /// DirectInput: Enterキー送信して入力欄をクリア
+  /// DirectInput: Enterキー送信して入力欄をリセット
   void _sendDirectEnterAndClear() {
     if (widget.hapticFeedback) {
       HapticFeedback.lightImpact();
     }
     widget.onSpecialKeyPressed('Enter');
-    // 入力欄をクリア
-    _directInputController.clear();
+    _resetToSentinel();
   }
 
   @override
