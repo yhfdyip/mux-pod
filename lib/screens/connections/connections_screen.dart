@@ -726,17 +726,36 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Sessions Section
+          // Sessions Section Header with Reload Button
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Text(
-              'ACTIVE SESSIONS',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
-                letterSpacing: 1.5,
-              ),
+            child: Row(
+              children: [
+                Text(
+                  'ACTIVE SESSIONS',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    icon: Icon(
+                      Icons.refresh,
+                      color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
+                    ),
+                    onPressed: _isLoadingSessions ? null : _fetchSessions,
+                    tooltip: 'Reload sessions',
+                  ),
+                ),
+              ],
             ),
           ),
           // Sessions List

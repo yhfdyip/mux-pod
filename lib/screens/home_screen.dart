@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/active_session_provider.dart';
+import '../providers/connection_provider.dart';
+import '../services/keychain/secure_storage.dart';
+import '../services/ssh/ssh_client.dart';
+import '../services/tmux/tmux_commands.dart';
+import '../services/tmux/tmux_parser.dart';
 import '../theme/design_colors.dart';
 import 'connections/connections_screen.dart';
 import 'keys/keys_screen.dart';
@@ -169,11 +174,18 @@ class HomeScreen extends ConsumerWidget {
 }
 
 /// ターミナルタブ - アクティブセッション一覧表示
-class _TerminalTab extends ConsumerWidget {
+class _TerminalTab extends ConsumerStatefulWidget {
   const _TerminalTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TerminalTab> createState() => _TerminalTabState();
+}
+
+class _TerminalTabState extends ConsumerState<_TerminalTab> {
+  bool _isReloading = false;
+
+  @override
+  Widget build(BuildContext context) {
     final activeSessionsState = ref.watch(activeSessionsProvider);
     // 接続中（isAttached == true）のセッションのみ表示
     final sessions = activeSessionsState.sessions
@@ -183,7 +195,7 @@ class _TerminalTab extends ConsumerWidget {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          _buildAppBar(context, ref),
+          _buildAppBar(context),
           if (sessions.isEmpty)
             const SliverFillRemaining(
               child: _EmptySessionsView(),
@@ -199,8 +211,8 @@ class _TerminalTab extends ConsumerWidget {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: _SessionCard(
                         session: session,
-                        onTap: () => _openSession(context, ref, session),
-                        onClose: () => _closeSession(ref, session),
+                        onTap: () => _openSession(session),
+                        onClose: () => _closeSession(session),
                       ),
                     );
                   },
@@ -213,7 +225,7 @@ class _TerminalTab extends ConsumerWidget {
     );
   }
 
-  Widget _buildAppBar(BuildContext context, WidgetRef ref) {
+  Widget _buildAppBar(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
     return SliverAppBar(
@@ -236,6 +248,23 @@ class _TerminalTab extends ConsumerWidget {
       ),
       actions: [
         IconButton(
+          icon: _isReloading
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight,
+                  ),
+                )
+              : Icon(
+                  Icons.refresh,
+                  color: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight,
+                ),
+          onPressed: _isReloading ? null : _reloadSessions,
+          tooltip: 'Reload sessions',
+        ),
+        IconButton(
           icon: Icon(
             Icons.settings,
             color: isDark ? DesignColors.textSecondary : DesignColors.textSecondaryLight,
@@ -248,7 +277,62 @@ class _TerminalTab extends ConsumerWidget {
     );
   }
 
-  void _openSession(BuildContext context, WidgetRef ref, ActiveSession session) {
+  Future<void> _reloadSessions() async {
+    setState(() => _isReloading = true);
+
+    try {
+      final connectionsState = ref.read(connectionsProvider);
+      final connections = connectionsState.connections;
+      final storage = SecureStorageService();
+
+      for (final connection in connections) {
+        try {
+          // 認証オプションを取得
+          SshConnectOptions options;
+          if (connection.authMethod == 'key' && connection.keyId != null) {
+            final privateKey = await storage.getPrivateKey(connection.keyId!);
+            final passphrase = await storage.getPassphrase(connection.keyId!);
+            options = SshConnectOptions(privateKey: privateKey, passphrase: passphrase);
+          } else {
+            final password = await storage.getPassword(connection.id);
+            options = SshConnectOptions(password: password);
+          }
+
+          // SSH接続してセッション一覧を取得
+          final sshClient = SshClient();
+          await sshClient.connect(
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+            options: options,
+          );
+
+          final output = await sshClient.exec(TmuxCommands.listSessions());
+          final tmuxSessions = TmuxParser.parseSessions(output);
+
+          // 切断
+          await sshClient.disconnect();
+
+          // ActiveSessionsProviderを更新
+          ref.read(activeSessionsProvider.notifier).updateSessionsForConnection(
+                connectionId: connection.id,
+                connectionName: connection.name,
+                host: connection.host,
+                tmuxSessions: tmuxSessions,
+              );
+        } catch (e) {
+          // 個別の接続エラーは無視（他の接続は続行）
+          debugPrint('Failed to reload sessions for ${connection.name}: $e');
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isReloading = false);
+      }
+    }
+  }
+
+  void _openSession(ActiveSession session) {
     ref.read(activeSessionsProvider.notifier).setCurrentSession(
           session.connectionId,
           session.sessionName,
@@ -265,7 +349,7 @@ class _TerminalTab extends ConsumerWidget {
     );
   }
 
-  void _closeSession(WidgetRef ref, ActiveSession session) {
+  void _closeSession(ActiveSession session) {
     ref.read(activeSessionsProvider.notifier).closeSession(
           session.connectionId,
           session.sessionName,
