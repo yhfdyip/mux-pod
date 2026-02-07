@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 
+import 'persistent_shell.dart';
+
 /// SSH接続エラー
 class SshConnectionError implements Exception {
   final String message;
@@ -120,6 +122,9 @@ class SshClient {
   StreamSubscription<Uint8List>? _stdoutSubscription;
   StreamSubscription<Uint8List>? _stderrSubscription;
 
+  /// 持続的シェルセッション（ポーリング用）
+  PersistentShell? _persistentShell;
+
   /// Keep-aliveタイマー
   Timer? _keepAliveTimer;
 
@@ -129,11 +134,20 @@ class SshClient {
   /// 接続状態のストリーム（外部から監視用）
   Stream<SshConnectionState> get connectionStateStream => _connectionStateController.stream;
 
-  /// Keep-alive間隔（秒）
-  static const int _keepAliveIntervalSeconds = 15;
+  /// Keep-alive最小間隔（秒）
+  static const int _minKeepAliveIntervalSeconds = 5;
 
-  /// Keep-aliveタイムアウト（秒）
-  static const int _keepAliveTimeoutSeconds = 5;
+  /// Keep-alive最大間隔（秒）
+  static const int _maxKeepAliveIntervalSeconds = 30;
+
+  /// Keep-aliveタイムアウト（秒）- 高速検知のため3秒に短縮
+  static const int _keepAliveTimeoutSeconds = 3;
+
+  /// 現在のKeep-alive間隔（動的に調整）
+  int _currentKeepAliveIntervalSeconds = 10;
+
+  /// Keep-alive連続成功回数
+  int _keepAliveSuccessCount = 0;
 
   /// 現在の接続状態
   SshConnectionState get state => _state;
@@ -196,6 +210,9 @@ class SshClient {
 
       _state = SshConnectionState.connected;
       _connectionStateController.add(_state);
+
+      // 持続的シェルを開始（ポーリング用）
+      await _startPersistentShell();
 
       // Keep-aliveを開始
       _startKeepAlive();
@@ -285,6 +302,10 @@ class SshClient {
     // Keep-aliveを停止
     _stopKeepAlive();
 
+    // 持続的シェルを解放
+    await _persistentShell?.dispose();
+    _persistentShell = null;
+
     await _stdoutSubscription?.cancel();
     await _stderrSubscription?.cancel();
     _stdoutSubscription = null;
@@ -300,15 +321,56 @@ class SshClient {
     _socket = null;
   }
 
+  /// 持続的シェルを開始
+  Future<void> _startPersistentShell() async {
+    if (_client == null) return;
+
+    try {
+      _persistentShell = PersistentShell(_client!);
+      await _persistentShell!.start();
+    } catch (e) {
+      // 持続的シェルの開始に失敗しても接続自体は継続
+      // 従来のexec()メソッドにフォールバック
+      _persistentShell = null;
+    }
+  }
+
+  /// 持続的シェルを再起動
+  Future<void> restartPersistentShell() async {
+    if (_client == null || !isConnected) return;
+
+    try {
+      await _persistentShell?.dispose();
+      _persistentShell = PersistentShell(_client!);
+      await _persistentShell!.start();
+    } catch (e) {
+      _persistentShell = null;
+    }
+  }
+
   /// Keep-aliveを開始
   ///
   /// 定期的に軽量なコマンドを実行して接続が生きているか確認する。
   /// 接続が切れていれば即座にエラー状態に遷移する。
+  /// 間隔は動的に調整される（成功時は延長、失敗時は短縮）。
   void _startKeepAlive() {
     _stopKeepAlive();
-    _keepAliveTimer = Timer.periodic(
-      Duration(seconds: _keepAliveIntervalSeconds),
-      (_) => _sendKeepAlive(),
+    _currentKeepAliveIntervalSeconds = 10; // 初期値10秒
+    _keepAliveSuccessCount = 0;
+    _scheduleNextKeepAlive();
+  }
+
+  /// 次のKeep-aliveをスケジュール
+  void _scheduleNextKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer(
+      Duration(seconds: _currentKeepAliveIntervalSeconds),
+      () async {
+        await _sendKeepAlive();
+        if (isConnected) {
+          _scheduleNextKeepAlive();
+        }
+      },
     );
   }
 
@@ -318,6 +380,23 @@ class SshClient {
     _keepAliveTimer = null;
   }
 
+  /// Keep-alive間隔を調整
+  void _adjustKeepAliveInterval({required bool success}) {
+    if (success) {
+      _keepAliveSuccessCount++;
+      // 3回連続成功で間隔を延長
+      if (_keepAliveSuccessCount >= 3) {
+        _currentKeepAliveIntervalSeconds = (_currentKeepAliveIntervalSeconds + 5)
+            .clamp(_minKeepAliveIntervalSeconds, _maxKeepAliveIntervalSeconds);
+        _keepAliveSuccessCount = 0;
+      }
+    } else {
+      // 失敗時は最小間隔に戻す
+      _currentKeepAliveIntervalSeconds = _minKeepAliveIntervalSeconds;
+      _keepAliveSuccessCount = 0;
+    }
+  }
+
   /// Keep-aliveパケットを送信
   Future<void> _sendKeepAlive() async {
     if (!isConnected || _client == null) {
@@ -325,12 +404,14 @@ class SshClient {
     }
 
     try {
-      // 軽量なコマンドでkeep-alive（echoコマンド）
-      await exec(
+      // 持続的シェル経由でkeep-alive（高速）
+      await execPersistent(
         'echo ping',
         timeout: Duration(seconds: _keepAliveTimeoutSeconds),
       );
+      _adjustKeepAliveInterval(success: true);
     } catch (e) {
+      _adjustKeepAliveInterval(success: false);
       // Keep-alive失敗 = 接続切断
       _lastError = 'Connection lost: $e';
       _updateState(SshConnectionState.error);
@@ -488,6 +569,42 @@ class SshClient {
       throw SshConnectionError('Command execution timed out');
     } catch (e) {
       throw SshConnectionError('Failed to execute command: $e', e);
+    }
+  }
+
+  /// 持続的シェル経由でコマンドを実行（高速）
+  ///
+  /// チャネル開閉のオーバーヘッドを排除し、1 RTT程度で実行可能。
+  /// ポーリングなど高頻度のコマンド実行に適している。
+  ///
+  /// [command] 実行コマンド
+  /// [timeout] タイムアウト時間
+  /// 戻り値: コマンド出力
+  Future<String> execPersistent(String command, {Duration? timeout}) async {
+    if (!isConnected || _client == null) {
+      throw SshConnectionError('Not connected');
+    }
+
+    // 持続的シェルが利用できない場合は従来のexec()にフォールバック
+    if (_persistentShell == null || !_persistentShell!.isStarted) {
+      return exec(command, timeout: timeout);
+    }
+
+    try {
+      return await _persistentShell!.exec(command, timeout: timeout);
+    } on PersistentShellError catch (e) {
+      // シェルセッションが切断された場合は再起動を試みる
+      if (e.message.contains('closed') || e.message.contains('disposed')) {
+        try {
+          await restartPersistentShell();
+          return await _persistentShell!.exec(command, timeout: timeout);
+        } catch (_) {
+          // 再起動も失敗した場合は従来のexec()にフォールバック
+          return exec(command, timeout: timeout);
+        }
+      }
+      // その他のエラーは従来のexec()にフォールバック
+      return exec(command, timeout: timeout);
     }
   }
 

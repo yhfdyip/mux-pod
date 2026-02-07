@@ -13,6 +13,8 @@ import '../../providers/settings_provider.dart';
 import '../../providers/ssh_provider.dart';
 import '../../providers/tmux_provider.dart';
 import '../../services/keychain/secure_storage.dart';
+import '../../services/network/network_monitor.dart';
+import '../../services/ssh/input_queue.dart';
 import '../../services/ssh/ssh_client.dart' show SshConnectOptions;
 import '../../services/tmux/tmux_commands.dart';
 import '../../services/tmux/tmux_parser.dart';
@@ -99,10 +101,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   // EnterCommand入力内容保持（ボトムシートを閉じても保持）
   String _savedCommandInput = '';
 
+  // 入力キュー（切断中の入力を保持）
+  final _inputQueue = InputQueue();
+
   // Riverpodリスナー
   ProviderSubscription<SshState>? _sshSubscription;
   ProviderSubscription<TmuxState>? _tmuxSubscription;
   ProviderSubscription<AppSettings>? _settingsSubscription;
+  ProviderSubscription<AsyncValue<NetworkStatus>>? _networkSubscription;
 
   @override
   void initState() {
@@ -165,6 +171,51 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       },
       fireImmediately: false,
     );
+
+    // ネットワーク状態の変化を監視
+    _networkSubscription = ref.listenManual<AsyncValue<NetworkStatus>>(
+      networkStatusProvider,
+      (previous, next) {
+        if (!mounted || _isDisposed) return;
+        // UI更新のためにsetStateを呼ぶ
+        setState(() {});
+      },
+      fireImmediately: true,
+    );
+
+    // 再接続成功時の処理を設定
+    final sshNotifier = ref.read(sshProvider.notifier);
+    sshNotifier.onReconnectSuccess = _onReconnectSuccess;
+  }
+
+  /// 再接続成功時の処理
+  Future<void> _onReconnectSuccess() async {
+    if (!mounted || _isDisposed) return;
+
+    // ポーリングフラグをリセット
+    _isPolling = false;
+
+    // ポーリングを再開
+    _startPolling();
+
+    // セッションツリーを再取得
+    _startTreeRefresh();
+
+    // キューされた入力を送信
+    await _flushInputQueue();
+
+    // UIを更新
+    if (mounted) setState(() {});
+  }
+
+  /// キューされた入力を送信
+  Future<void> _flushInputQueue() async {
+    if (_inputQueue.isEmpty) return;
+
+    final queuedInput = _inputQueue.flush();
+    if (queuedInput.isNotEmpty) {
+      await _sendKeyData(queuedInput);
+    }
   }
 
   /// SSH接続してtmuxセッションをセットアップ
@@ -374,22 +425,22 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
       final startTime = DateTime.now();
 
-      // 並列実行でコンテンツとカーソル位置を取得
-      final results = await Future.wait([
-        // 1. コンテンツ取得
-        sshClient.exec(
-          TmuxCommands.capturePane(target, escapeSequences: true, startLine: -1000),
-          timeout: const Duration(milliseconds: 500),
-        ),
-        // 2. カーソル位置取得
-        sshClient.exec(
-          TmuxCommands.getCursorPosition(target),
-          timeout: const Duration(milliseconds: 500),
-        ),
-      ]);
+      // 2つのコマンドを1つに統合して実行（持続的シェルは同時に1コマンドのみ）
+      // capture-pane + カーソル位置情報を1回で取得
+      // 出力形式: [ペイン内容]\n[カーソル情報]
+      final combinedCommand =
+          '${TmuxCommands.capturePane(target, escapeSequences: true, startLine: -1000)}; '
+          '${TmuxCommands.getCursorPosition(target)}';
 
-      final output = results[0];
-      final cursorOutput = results[1];
+      final combinedOutput = await sshClient.execPersistent(
+        combinedCommand,
+        timeout: const Duration(seconds: 2),
+      );
+
+      // 出力を分割（最後の行がカーソル情報）
+      final lines = combinedOutput.split('\n');
+      final cursorOutput = lines.isNotEmpty ? lines.removeLast() : '';
+      final output = lines.join('\n');
 
       // capture-paneの出力末尾にある改行を削除
       final processedOutput = output.endsWith('\n')
@@ -573,6 +624,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _isDisposed = true;
     // WakeLockを無効化
     WakelockPlus.disable();
+    // 再接続成功コールバックをクリア
+    ref.read(sshProvider.notifier).onReconnectSuccess = null;
     // Riverpodサブスクリプションをキャンセル
     _sshSubscription?.close();
     _sshSubscription = null;
@@ -580,6 +633,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     _tmuxSubscription = null;
     _settingsSubscription?.close();
     _settingsSubscription = null;
+    _networkSubscription?.close();
+    _networkSubscription = null;
     // タイマーを停止
     _pollTimer?.cancel();
     _pollTimer = null;
@@ -682,7 +737,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   /// キーデータをtmux send-keysで送信
   Future<void> _sendKeyData(String data) async {
     final sshClient = ref.read(sshProvider.notifier).client;
-    if (sshClient == null || !sshClient.isConnected) return;
+
+    // 接続が切れている場合はキューに追加
+    if (sshClient == null || !sshClient.isConnected) {
+      _inputQueue.enqueue(data);
+      if (mounted) setState(() {}); // キューイング状態を更新
+      return;
+    }
 
     final target = ref.read(tmuxProvider.notifier).currentTarget;
     if (target == null) return;
@@ -833,23 +894,93 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   Widget _buildErrorOverlay(String? error) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
+    final queuedCount = _inputQueue.length;
+    final isWaitingForNetwork = _sshState.isWaitingForNetwork;
+
     return Container(
       color: isDark ? Colors.black87 : Colors.white.withValues(alpha: 0.95),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, color: colorScheme.error, size: 48),
+            Icon(
+              isWaitingForNetwork ? Icons.signal_wifi_off : Icons.error_outline,
+              color: isWaitingForNetwork ? DesignColors.warning : colorScheme.error,
+              size: 48,
+            ),
             const SizedBox(height: 16),
             Text(
-              error ?? 'Connection error',
+              isWaitingForNetwork
+                  ? 'Waiting for network...'
+                  : (error ?? 'Connection error'),
               style: TextStyle(color: colorScheme.onSurface),
               textAlign: TextAlign.center,
             ),
+
+            // キューイング状態
+            if (queuedCount > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: DesignColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.keyboard,
+                      size: 16,
+                      color: DesignColors.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$queuedCount chars queued',
+                      style: TextStyle(
+                        color: DesignColors.primary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        _inputQueue.clear();
+                        setState(() {});
+                      },
+                      child: Icon(
+                        Icons.clear,
+                        size: 16,
+                        color: DesignColors.primary.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _connectAndSetup,
-              child: const Text('Retry'),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    ref.read(sshProvider.notifier).reconnectNow();
+                  },
+                  child: const Text('Retry Now'),
+                ),
+                if (_sshState.isReconnecting) ...[
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
@@ -1624,37 +1755,105 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   /// 再接続中インジケーター
   Widget _buildReconnectingIndicator() {
     final attempt = _sshState.reconnectAttempt;
-    final delayMs = _sshState.reconnectDelayMs ?? 0;
+    final isWaitingForNetwork = _sshState.isWaitingForNetwork;
+    final nextRetryAt = _sshState.nextRetryAt;
+    final queuedCount = _inputQueue.length;
+
+    // 次回リトライまでの秒数を計算
+    String? countdownText;
+    if (nextRetryAt != null && !isWaitingForNetwork) {
+      final remaining = nextRetryAt.difference(DateTime.now()).inSeconds;
+      if (remaining > 0) {
+        countdownText = '${remaining}s';
+      }
+    }
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          width: 10,
-          height: 10,
-          child: CircularProgressIndicator(
-            strokeWidth: 1.5,
+        // スピナーまたは圏外アイコン
+        if (isWaitingForNetwork)
+          Icon(
+            Icons.signal_wifi_off,
+            size: 12,
             color: DesignColors.warning.withValues(alpha: 0.8),
+          )
+        else
+          SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: DesignColors.warning.withValues(alpha: 0.8),
+            ),
           ),
-        ),
         const SizedBox(width: 6),
+
+        // ステータステキスト
         Text(
-          'Reconnecting${attempt > 1 ? ' ($attempt)' : ''}',
+          isWaitingForNetwork
+              ? 'Offline'
+              : 'Reconnecting${attempt > 1 ? ' ($attempt)' : ''}',
           style: GoogleFonts.jetBrainsMono(
             fontSize: 10,
             color: DesignColors.warning.withValues(alpha: 0.8),
           ),
         ),
-        if (delayMs > 0) ...[
+
+        // カウントダウン
+        if (countdownText != null) ...[
           const SizedBox(width: 4),
           Text(
-            '${delayMs}ms',
+            countdownText,
             style: GoogleFonts.jetBrainsMono(
               fontSize: 9,
               color: DesignColors.textMuted,
             ),
           ),
         ],
+
+        // キューイング状態
+        if (queuedCount > 0) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: DesignColors.primary.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '$queuedCount chars',
+              style: GoogleFonts.jetBrainsMono(
+                fontSize: 9,
+                color: DesignColors.primary,
+              ),
+            ),
+          ),
+        ],
+
+        // 今すぐ再接続ボタン
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: () {
+            ref.read(sshProvider.notifier).reconnectNow();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: DesignColors.warning.withValues(alpha: 0.5),
+              ),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'Retry',
+              style: GoogleFonts.jetBrainsMono(
+                fontSize: 9,
+                color: DesignColors.warning,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1665,7 +1864,15 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   /// [literal] trueの場合はリテラル送信（-l フラグ）
   Future<void> _sendKey(String key, {bool literal = true}) async {
     final sshClient = ref.read(sshProvider.notifier).client;
-    if (sshClient == null || !sshClient.isConnected) return;
+
+    // 接続が切れている場合はキューに追加（リテラルの場合のみ）
+    if (sshClient == null || !sshClient.isConnected) {
+      if (literal) {
+        _inputQueue.enqueue(key);
+        if (mounted) setState(() {}); // キューイング状態を更新
+      }
+      return;
+    }
 
     final target = ref.read(tmuxProvider.notifier).currentTarget;
     if (target == null) return;
@@ -1680,6 +1887,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   /// tmux特殊キーを送信（Ctrl+C, Escape等）
   Future<void> _sendSpecialKey(String tmuxKey) async {
     final sshClient = ref.read(sshProvider.notifier).client;
+
+    // 特殊キーは接続が切れている場合は送信しない（キューしない）
     if (sshClient == null || !sshClient.isConnected) return;
 
     final target = ref.read(tmuxProvider.notifier).currentTarget;
