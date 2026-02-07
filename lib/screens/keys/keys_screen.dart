@@ -28,13 +28,13 @@ class KeysScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
         heroTag: 'fab_add_ssh_key',
-        onPressed: () {
-          _showAddKeyOptions(context);
-        },
-        icon: const Icon(Icons.add, size: 20),
-        label: const Text('Add Key'),
+        onPressed: () => _showAddKeyOptions(context),
+        elevation: 0,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        child: const Icon(Icons.add),
       ),
     );
   }

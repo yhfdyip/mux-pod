@@ -235,14 +235,13 @@ class ConnectionsScreen extends ConsumerWidget {
 
   Widget _buildFAB(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-    return FloatingActionButton.extended(
+    return FloatingActionButton(
       heroTag: 'fab_add_connection',
       onPressed: () => _addConnection(context, ref),
-      icon: const Icon(Icons.add, size: 20),
-      label: const Text('Add New Connection'),
       elevation: 0,
       backgroundColor: colorScheme.primary,
       foregroundColor: colorScheme.onPrimary,
+      child: const Icon(Icons.add),
     );
   }
 
