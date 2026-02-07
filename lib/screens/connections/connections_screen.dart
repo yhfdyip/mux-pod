@@ -480,6 +480,13 @@ class ConnectionsScreen extends ConsumerWidget {
     String? sessionName,
   ) {
     ref.read(connectionsProvider.notifier).updateLastConnected(connection.id);
+    // 既存セッションを開く場合は最終アクセス日時を更新
+    if (sessionName != null) {
+      ref.read(activeSessionsProvider.notifier).touchSession(
+            connection.id,
+            sessionName,
+          );
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => TerminalScreen(

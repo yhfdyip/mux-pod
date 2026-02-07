@@ -21,6 +21,9 @@ class ActiveSession {
   /// 最後に開いていたペインID
   final String? lastPaneId;
 
+  /// 最終アクセス日時（履歴ソート用）
+  final DateTime? lastAccessedAt;
+
   const ActiveSession({
     required this.connectionId,
     required this.connectionName,
@@ -31,6 +34,7 @@ class ActiveSession {
     this.isAttached = true,
     this.lastWindowIndex,
     this.lastPaneId,
+    this.lastAccessedAt,
   });
 
   ActiveSession copyWith({
@@ -43,6 +47,7 @@ class ActiveSession {
     bool? isAttached,
     int? lastWindowIndex,
     String? lastPaneId,
+    DateTime? lastAccessedAt,
     bool clearLastPane = false,
   }) {
     return ActiveSession(
@@ -55,6 +60,7 @@ class ActiveSession {
       isAttached: isAttached ?? this.isAttached,
       lastWindowIndex: lastWindowIndex ?? this.lastWindowIndex,
       lastPaneId: clearLastPane ? null : (lastPaneId ?? this.lastPaneId),
+      lastAccessedAt: lastAccessedAt ?? this.lastAccessedAt,
     );
   }
 
@@ -70,11 +76,13 @@ class ActiveSession {
       'isAttached': isAttached,
       'lastWindowIndex': lastWindowIndex,
       'lastPaneId': lastPaneId,
+      'lastAccessedAt': lastAccessedAt?.toIso8601String(),
     };
   }
 
   /// JSONからデシリアライズ
   factory ActiveSession.fromJson(Map<String, dynamic> json) {
+    final lastAccessedAtStr = json['lastAccessedAt'] as String?;
     return ActiveSession(
       connectionId: json['connectionId'] as String,
       connectionName: json['connectionName'] as String,
@@ -85,6 +93,7 @@ class ActiveSession {
       isAttached: json['isAttached'] as bool? ?? false,
       lastWindowIndex: json['lastWindowIndex'] as int?,
       lastPaneId: json['lastPaneId'] as String?,
+      lastAccessedAt: lastAccessedAtStr != null ? DateTime.parse(lastAccessedAtStr) : null,
     );
   }
 
@@ -188,6 +197,7 @@ class ActiveSessionsNotifier extends Notifier<ActiveSessionsState> {
     );
 
     final existingSession = existingIndex >= 0 ? state.sessions[existingIndex] : null;
+    final now = DateTime.now();
 
     final session = ActiveSession(
       connectionId: connectionId,
@@ -195,10 +205,11 @@ class ActiveSessionsNotifier extends Notifier<ActiveSessionsState> {
       host: host,
       sessionName: sessionName,
       windowCount: windowCount,
-      connectedAt: existingSession?.connectedAt ?? DateTime.now(),
+      connectedAt: existingSession?.connectedAt ?? now,
       isAttached: isAttached,
       lastWindowIndex: lastWindowIndex ?? existingSession?.lastWindowIndex,
       lastPaneId: lastPaneId ?? existingSession?.lastPaneId,
+      lastAccessedAt: isAttached ? now : existingSession?.lastAccessedAt,
     );
 
     final sessions = [...state.sessions];
@@ -227,6 +238,22 @@ class ActiveSessionsNotifier extends Notifier<ActiveSessionsState> {
     sessions[existingIndex] = sessions[existingIndex].copyWith(
       lastWindowIndex: windowIndex,
       lastPaneId: paneId,
+      lastAccessedAt: DateTime.now(),
+    );
+
+    state = state.copyWith(sessions: sessions);
+    _saveToStorage();
+  }
+
+  /// セッションを開いた時に最終アクセス日時を更新
+  void touchSession(String connectionId, String sessionName) {
+    final key = '$connectionId:$sessionName';
+    final existingIndex = state.sessions.indexWhere((s) => s.key == key);
+    if (existingIndex < 0) return;
+
+    final sessions = [...state.sessions];
+    sessions[existingIndex] = sessions[existingIndex].copyWith(
+      lastAccessedAt: DateTime.now(),
     );
 
     state = state.copyWith(sessions: sessions);
@@ -234,7 +261,7 @@ class ActiveSessionsNotifier extends Notifier<ActiveSessionsState> {
   }
 
   /// 接続のセッション一覧を更新（tmuxセッションリストから）
-  /// 既存のセッションの lastWindowIndex/lastPaneId は保持する
+  /// 既存のセッションの lastWindowIndex/lastPaneId/lastAccessedAt は保持する
   void updateSessionsForConnection({
     required String connectionId,
     required String connectionName,
@@ -264,6 +291,7 @@ class ActiveSessionsNotifier extends Notifier<ActiveSessionsState> {
         isAttached: ts.attached,
         lastWindowIndex: existing?.lastWindowIndex,
         lastPaneId: existing?.lastPaneId,
+        lastAccessedAt: existing?.lastAccessedAt,
       );
     }).toList();
 
