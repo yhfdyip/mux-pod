@@ -259,15 +259,36 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
       // 5. セッションを選択または新規作成
       String sessionName;
-      if (sessions.isNotEmpty) {
-        sessionName = widget.sessionName ?? sessions.first.name;
+      if (widget.sessionName != null) {
+        // セッション名が指定されている場合
+        final existingIndex = sessions.indexWhere(
+          (s) => s.name == widget.sessionName,
+        );
+        if (existingIndex >= 0) {
+          // 既存セッションに接続
+          sessionName = sessions[existingIndex].name;
+        } else {
+          // 新規セッション作成
+          final sshClient = ref.read(sshProvider.notifier).client;
+          await sshClient?.exec(TmuxCommands.newSession(
+            name: widget.sessionName!,
+            detached: true,
+          ));
+          if (!mounted || _isDisposed) return;
+          await _refreshSessionTree();
+          if (!mounted || _isDisposed) return;
+          sessionName = widget.sessionName!;
+        }
+      } else if (sessions.isNotEmpty) {
+        // セッション名が指定されていない場合は最初のセッションに接続
+        sessionName = sessions.first.name;
       } else {
-        // セッションがない場合は新規作成
+        // セッションがない場合は自動生成名で新規作成
         final sshClient = ref.read(sshProvider.notifier).client;
         sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
         await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
         if (!mounted || _isDisposed) return;
-        await _refreshSessionTree(); // ツリーを再取得
+        await _refreshSessionTree();
         if (!mounted || _isDisposed) return;
       }
 
