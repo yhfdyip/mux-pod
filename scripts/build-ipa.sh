@@ -71,7 +71,12 @@ update_bundle_id() {
   local new_id="$1"
   for file in "${XCCONFIG_FILES[@]}"; do
     if [[ -f "$file" ]]; then
-      sed -i "s/^PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = $new_id/" "$file"
+      # macOS (BSD sed) requires '' after -i, GNU sed does not
+      if [[ "$(uname)" == "Darwin" ]]; then
+        sed -i '' "s/^PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = $new_id/" "$file"
+      else
+        sed -i "s/^PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = $new_id/" "$file"
+      fi
     fi
   done
 }
