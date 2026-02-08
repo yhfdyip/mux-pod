@@ -9,7 +9,6 @@ import '../../widgets/dialogs/font_size_dialog.dart';
 import '../../widgets/dialogs/font_family_dialog.dart';
 import '../../widgets/dialogs/min_font_size_dialog.dart';
 import '../../widgets/dialogs/theme_dialog.dart';
-import '../notifications/notification_rules_screen.dart';
 
 /// 設定画面
 class SettingsScreen extends ConsumerWidget {
@@ -126,21 +125,6 @@ class SettingsScreen extends ConsumerWidget {
                   value: settings.keepScreenOn,
                   onChanged: (value) {
                     ref.read(settingsProvider.notifier).setKeepScreenOn(value);
-                  },
-                ),
-                const Divider(),
-                const _SectionHeader(title: 'Notifications'),
-                ListTile(
-                  leading: const Icon(Icons.notifications_active),
-                  title: const Text('Notification Rules'),
-                  subtitle: const Text('Configure pattern-based alerts'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => const NotificationRulesScreen(),
-                      ),
-                    );
                   },
                 ),
                 const Divider(),
