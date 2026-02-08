@@ -78,6 +78,10 @@ class AnsiTextView extends ConsumerStatefulWidget {
   /// カーソルY位置（0-based, ペイン上部基準）
   final int cursorY;
 
+  /// ホールド+スワイプで矢印キー入力時のコールバック
+  /// direction: 'Up', 'Down', 'Left', 'Right'
+  final void Function(String direction)? onArrowSwipe;
+
   const AnsiTextView({
     super.key,
     required this.text,
@@ -92,6 +96,7 @@ class AnsiTextView extends ConsumerStatefulWidget {
     this.verticalScrollController,
     this.cursorX = 0,
     this.cursorY = 0,
+    this.onArrowSwipe,
   });
 
   @override
@@ -120,6 +125,11 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
   bool _ctrlPressed = false;
   bool _altPressed = false;
   bool _shiftPressed = false;
+
+  /// ホールド+スワイプ用の状態
+  bool _isLongPressing = false;
+  Offset? _longPressStartPosition;
+  static const double _swipeThreshold = 30.0;
 
   /// 現在のズームスケール
   double _currentScale = 1.0;
@@ -262,6 +272,50 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
 
   void _onScaleEnd(ScaleEndDetails details) {
     // ズーム終了時の処理（必要に応じて）
+  }
+
+  // === ホールド+スワイプ処理 ===
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    _isLongPressing = true;
+    _longPressStartPosition = details.localPosition;
+    HapticFeedback.lightImpact();
+  }
+
+  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+    if (!_isLongPressing || _longPressStartPosition == null) return;
+
+    final delta = details.localPosition - _longPressStartPosition!;
+    String? direction;
+
+    // 閾値を超えた方向を検出
+    if (delta.dx.abs() > delta.dy.abs()) {
+      // 水平方向
+      if (delta.dx > _swipeThreshold) {
+        direction = 'Right';
+      } else if (delta.dx < -_swipeThreshold) {
+        direction = 'Left';
+      }
+    } else {
+      // 垂直方向
+      if (delta.dy > _swipeThreshold) {
+        direction = 'Down';
+      } else if (delta.dy < -_swipeThreshold) {
+        direction = 'Up';
+      }
+    }
+
+    if (direction != null) {
+      widget.onArrowSwipe?.call(direction);
+      HapticFeedback.selectionClick();
+      // 起点をリセットして連続スワイプ対応
+      _longPressStartPosition = details.localPosition;
+    }
+  }
+
+  void _onLongPressEnd(LongPressEndDetails details) {
+    _isLongPressing = false;
+    _longPressStartPosition = null;
   }
 
   /// 現在のズームスケールを取得
@@ -497,12 +551,16 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
         }
 
         // 通常モード：キーボード入力をハンドリング
+        // ホールド+スワイプで矢印キー入力対応
         return Focus(
           focusNode: _focusNode,
           autofocus: true,
           onKeyEvent: _handleKeyEvent,
           child: GestureDetector(
             onTap: () => _focusNode.requestFocus(),
+            onLongPressStart: _onLongPressStart,
+            onLongPressMoveUpdate: _onLongPressMoveUpdate,
+            onLongPressEnd: _onLongPressEnd,
             child: Container(
               color: widget.backgroundColor,
               child: listWidget,

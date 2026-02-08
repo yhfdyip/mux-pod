@@ -706,6 +706,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                         verticalScrollController: _terminalScrollController,
                         cursorX: tmuxState.activePane?.cursorX ?? 0,
                         cursorY: tmuxState.activePane?.cursorY ?? 0,
+                        onArrowSwipe: _sendSpecialKey,
                       ),
                     ),
                     // Pane indicator (右上)

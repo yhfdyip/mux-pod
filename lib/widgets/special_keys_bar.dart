@@ -386,19 +386,13 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
-          // 左矢印 (tmux: Left)
+          // 矢印キー横並び: 左・上・下・右
           _buildArrowButton(Icons.arrow_left, 'Left'),
           const SizedBox(width: 2),
-          // 上下矢印スタック
-          Column(
-            children: [
-              _buildSmallArrowButton(Icons.arrow_drop_up, 'Up'),
-              const SizedBox(height: 2),
-              _buildSmallArrowButton(Icons.arrow_drop_down, 'Down'),
-            ],
-          ),
+          _buildArrowButton(Icons.arrow_drop_up, 'Up'),
           const SizedBox(width: 2),
-          // 右矢印 (tmux: Right)
+          _buildArrowButton(Icons.arrow_drop_down, 'Down'),
+          const SizedBox(width: 2),
           _buildArrowButton(Icons.arrow_right, 'Right'),
           const SizedBox(width: 8),
           // DirectInputモードトグルボタン
@@ -693,33 +687,6 @@ class _SpecialKeysBarState extends State<SpecialKeysBar> {
         child: Icon(
           icon,
           size: 16,
-          color: colorScheme.onSurface,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSmallArrowButton(IconData icon, String tmuxKey) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTapDown: (_) {
-        if (widget.hapticFeedback) {
-          HapticFeedback.lightImpact();
-        }
-      },
-      onTap: () => _sendSpecialKey(tmuxKey),
-      child: Container(
-        width: 36,
-        height: 17,
-        decoration: BoxDecoration(
-          color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
-        ),
-        child: Icon(
-          icon,
-          size: 14,
           color: colorScheme.onSurface,
         ),
       ),
