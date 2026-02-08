@@ -9,6 +9,7 @@ import '../../widgets/dialogs/font_size_dialog.dart';
 import '../../widgets/dialogs/font_family_dialog.dart';
 import '../../widgets/dialogs/min_font_size_dialog.dart';
 import '../../widgets/dialogs/theme_dialog.dart';
+import 'licenses_screen.dart';
 
 /// 設定画面
 class SettingsScreen extends ConsumerWidget {
@@ -155,12 +156,25 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.code),
                   title: const Text('Source Code'),
-                  subtitle: const Text('github.com/muxpod'),
+                  subtitle: const Text('github.com/moezakura/mux-pod'),
                   onTap: () async {
-                    final url = Uri.parse('https://github.com/muxpod');
+                    final url = Uri.parse('https://github.com/moezakura/mux-pod');
                     if (await canLaunchUrl(url)) {
                       await launchUrl(url, mode: LaunchMode.externalApplication);
                     }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.description),
+                  title: const Text('Licenses'),
+                  subtitle: const Text('Open source licenses'),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const LicensesScreen(),
+                      ),
+                    );
                   },
                 ),
               ]),
