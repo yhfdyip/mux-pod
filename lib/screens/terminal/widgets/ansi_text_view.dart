@@ -129,6 +129,7 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
   /// ホールド+スワイプ用の状態
   bool _isLongPressing = false;
   Offset? _longPressStartPosition;
+  String? _lastSwipeDirection;
   static const double _swipeThreshold = 30.0;
 
   /// 現在のズームスケール
@@ -277,8 +278,11 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
   // === ホールド+スワイプ処理 ===
 
   void _onLongPressStart(LongPressStartDetails details) {
-    _isLongPressing = true;
-    _longPressStartPosition = details.localPosition;
+    setState(() {
+      _isLongPressing = true;
+      _longPressStartPosition = details.localPosition;
+      _lastSwipeDirection = null;
+    });
     HapticFeedback.lightImpact();
   }
 
@@ -306,16 +310,115 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
     }
 
     if (direction != null) {
+      setState(() {
+        _lastSwipeDirection = direction;
+      });
       widget.onArrowSwipe?.call(direction);
       HapticFeedback.selectionClick();
       // 起点をリセットして連続スワイプ対応
       _longPressStartPosition = details.localPosition;
+      // ハイライトを短時間後にリセット
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted && _isLongPressing) {
+          setState(() {
+            _lastSwipeDirection = null;
+          });
+        }
+      });
     }
   }
 
   void _onLongPressEnd(LongPressEndDetails details) {
-    _isLongPressing = false;
-    _longPressStartPosition = null;
+    setState(() {
+      _isLongPressing = false;
+      _longPressStartPosition = null;
+      _lastSwipeDirection = null;
+    });
+  }
+
+  /// スワイプオーバーレイウィジェット
+  Widget _buildSwipeOverlay() {
+    return Center(
+      child: AnimatedOpacity(
+        opacity: _isLongPressing ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 150),
+        child: Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Stack(
+            children: [
+              // 上矢印
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Icon(
+                  Icons.arrow_drop_up,
+                  size: 40,
+                  color: _lastSwipeDirection == 'Up'
+                      ? Colors.amber
+                      : Colors.white.withValues(alpha: 0.6),
+                ),
+              ),
+              // 下矢印
+              Positioned(
+                bottom: 8,
+                left: 0,
+                right: 0,
+                child: Icon(
+                  Icons.arrow_drop_down,
+                  size: 40,
+                  color: _lastSwipeDirection == 'Down'
+                      ? Colors.amber
+                      : Colors.white.withValues(alpha: 0.6),
+                ),
+              ),
+              // 左矢印
+              Positioned(
+                left: 8,
+                top: 0,
+                bottom: 0,
+                child: Icon(
+                  Icons.arrow_left,
+                  size: 40,
+                  color: _lastSwipeDirection == 'Left'
+                      ? Colors.amber
+                      : Colors.white.withValues(alpha: 0.6),
+                ),
+              ),
+              // 右矢印
+              Positioned(
+                right: 8,
+                top: 0,
+                bottom: 0,
+                child: Icon(
+                  Icons.arrow_right,
+                  size: 40,
+                  color: _lastSwipeDirection == 'Right'
+                      ? Colors.amber
+                      : Colors.white.withValues(alpha: 0.6),
+                ),
+              ),
+              // 中央の点
+              Center(
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// 現在のズームスケールを取得
@@ -561,9 +664,15 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
             onLongPressStart: _onLongPressStart,
             onLongPressMoveUpdate: _onLongPressMoveUpdate,
             onLongPressEnd: _onLongPressEnd,
-            child: Container(
-              color: widget.backgroundColor,
-              child: listWidget,
+            child: Stack(
+              children: [
+                Container(
+                  color: widget.backgroundColor,
+                  child: listWidget,
+                ),
+                // スワイプオーバーレイ
+                if (_isLongPressing) _buildSwipeOverlay(),
+              ],
             ),
           ),
         );
