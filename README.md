@@ -23,7 +23,7 @@
 ---
 
 <p align="center">
-  <video src="https://github.com/moezakura/mux-pod/raw/main/docs/demo.mp4" width="280" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/c7405e41-41ed-43ac-afb0-35091a357117" width="280" autoplay loop muted playsinline></video>
 </p>
 
 ---
