@@ -140,7 +140,7 @@ class TmuxCommands {
 
   /// 全ペインを取得するコマンド（セッションツリー構築用）
   ///
-  /// 出力フォーマット: 完全なツリー情報
+  /// 出力フォーマット: 完全なツリー情報（window_flags含む）
   static String listAllPanes() {
     return 'tmux list-panes -a -F "'
         '#{session_name}$delimiter'
@@ -159,7 +159,8 @@ class TmuxCommands {
         '#{pane_title}$delimiter'
         '#{pane_current_command}$delimiter'
         '#{cursor_x}$delimiter'
-        '#{cursor_y}'
+        '#{cursor_y}$delimiter'
+        '#{window_flags}'
         '"';
   }
 

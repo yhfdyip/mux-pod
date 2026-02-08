@@ -270,6 +270,8 @@ class TmuxParser {
         () => TmuxSession(name: sessionName, id: sessionId),
       );
 
+      final windowFlags = parts.length > 17 ? _parseWindowFlags(parts[17]) : const <TmuxWindowFlag>{};
+
       // ウィンドウマップを取得または作成
       windowsMap.putIfAbsent(sessionName, () => {});
       final windows = windowsMap[sessionName]!;
@@ -282,6 +284,7 @@ class TmuxParser {
           id: windowId,
           name: windowName,
           active: windowActive,
+          flags: windowFlags,
         ),
       );
 
