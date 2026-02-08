@@ -101,7 +101,12 @@ flutter pub get
 
 # Build IPA
 echo "Building IPA..."
-FLUTTER_ARGS=(build ipa "--$BUILD_MODE")
+FLUTTER_ARGS=(build ipa)
+
+# --release is default, only add flag for debug/profile
+if [[ "$BUILD_MODE" != "release" ]]; then
+  FLUTTER_ARGS+=("--$BUILD_MODE")
+fi
 
 if [[ -n "$EXPORT_OPTIONS" ]]; then
   FLUTTER_ARGS+=(--export-options-plist "$EXPORT_OPTIONS")
