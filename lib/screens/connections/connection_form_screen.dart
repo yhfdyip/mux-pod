@@ -33,10 +33,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   final _portController = TextEditingController(text: '22');
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _timeoutController = TextEditingController(text: '10');
 
   String _authMethod = 'password';
-  String _protocol = 'ssh'; // ssh or mosh
   String? _selectedKeyId;
   bool _isSaving = false;
   bool _isTesting = false;
@@ -69,7 +67,6 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     _portController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
-    _timeoutController.dispose();
     super.dispose();
   }
 
@@ -102,13 +99,9 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
               children: [
-                _buildGeneralSection(),
+                _buildServerSection(),
                 const SizedBox(height: 24),
-                _buildNetworkSection(),
-                const SizedBox(height: 24),
-                _buildSecuritySection(keysState),
-                const SizedBox(height: 24),
-                _buildAdvancedToggle(),
+                _buildAuthSection(keysState),
               ],
             ),
           ),
@@ -165,66 +158,29 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     );
   }
 
-  Widget _buildSectionHeader(String title, {IconData? trailingIcon}) {
+  Widget _buildSectionHeader(String title) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title.toUpperCase(),
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.5,
-              color: mutedColor,
-            ),
-          ),
-          if (trailingIcon != null)
-            Icon(trailingIcon, size: 16, color: mutedColor),
-        ],
+      child: Text(
+        title.toUpperCase(),
+        style: GoogleFonts.spaceGrotesk(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.5,
+          color: mutedColor,
+        ),
       ),
     );
   }
 
-  Widget _buildGeneralSection() {
+  Widget _buildServerSection() {
     final colorScheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader('General Info', trailingIcon: Icons.info_outline),
-        Container(
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: colorScheme.outline.withValues(alpha: 0.2)),
-          ),
-          padding: const EdgeInsets.all(4),
-          child: _buildInputField(
-            controller: _nameController,
-            label: 'CONNECTION NAME',
-            hint: 'e.g. Production AWS',
-            prefixIcon: Icons.label_outline,
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Please enter a name';
-              }
-              return null;
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNetworkSection() {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader('Network'),
+        _buildSectionHeader('Server'),
         Container(
           decoration: BoxDecoration(
             color: colorScheme.surface,
@@ -235,16 +191,21 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Connection name
+              _buildFieldLabel('CONNECTION NAME'),
+              const SizedBox(height: 8),
+              _buildNameInput(),
+              const SizedBox(height: 16),
               // Host field
               _buildFieldLabel('HOST / IP ADDRESS'),
               const SizedBox(height: 8),
               _buildHostInput(),
               const SizedBox(height: 16),
-              // Port & Timeout row
+              // Port & Username row
               Row(
                 children: [
                   Expanded(
-                    flex: 2,
+                    flex: 1,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -256,13 +217,13 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                   ),
                   const SizedBox(width: 16),
                   Expanded(
-                    flex: 1,
+                    flex: 2,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildFieldLabel('TIMEOUT'),
+                        _buildFieldLabel('USERNAME'),
                         const SizedBox(height: 8),
-                        _buildTimeoutInput(),
+                        _buildUsernameInput(),
                       ],
                     ),
                   ),
@@ -275,38 +236,12 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     );
   }
 
-  Widget _buildSecuritySection(KeysState keysState) {
+  Widget _buildAuthSection(KeysState keysState) {
     final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'SECURITY & AUTH',
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
-                  color: mutedColor,
-                ),
-              ),
-              // Protocol toggle
-              Row(
-                children: [
-                  _buildProtocolBadge('SSH', _protocol == 'ssh'),
-                  const SizedBox(width: 8),
-                  _buildProtocolBadge('MOSH', _protocol == 'mosh'),
-                ],
-              ),
-            ],
-          ),
-        ),
+        _buildSectionHeader('Authentication'),
         Container(
           decoration: BoxDecoration(
             color: colorScheme.surface,
@@ -316,15 +251,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              // Username field
-              _buildUsernameInput(),
-              const SizedBox(height: 16),
-              Divider(color: colorScheme.outline.withValues(alpha: 0.2), height: 1),
-              const SizedBox(height: 16),
-              // Auth method toggle
               _buildAuthMethodToggle(),
               const SizedBox(height: 16),
-              // Password or Key selection
               if (_authMethod == 'password')
                 _buildPasswordInput()
               else
@@ -333,38 +261,6 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildProtocolBadge(String label, bool isSelected) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
-    return GestureDetector(
-      onTap: () => setState(() => _protocol = label.toLowerCase()),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        decoration: BoxDecoration(
-          color: isSelected ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: colorScheme.primary.withValues(alpha: 0.3),
-                    blurRadius: 10,
-                  ),
-                ]
-              : null,
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: isSelected ? colorScheme.onPrimary : mutedColor,
-          ),
-        ),
-      ),
     );
   }
 
@@ -381,64 +277,44 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     );
   }
 
-  Widget _buildInputField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required IconData prefixIcon,
-    TextInputType? keyboardType,
-    String? Function(String?)? validator,
-  }) {
+  Widget _buildNameInput() {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
-    return Stack(
-      children: [
-        TextFormField(
-          controller: controller,
-          keyboardType: keyboardType,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-            color: colorScheme.onSurface,
-          ),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: GoogleFonts.spaceGrotesk(color: mutedColor),
-            prefixIcon: Icon(prefixIcon, color: mutedColor),
-            filled: true,
-            fillColor: inputColor,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.primary, width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          ),
-          validator: validator,
+    return TextFormField(
+      controller: _nameController,
+      style: GoogleFonts.spaceGrotesk(
+        fontSize: 16,
+        fontWeight: FontWeight.w500,
+        color: colorScheme.onSurface,
+      ),
+      decoration: InputDecoration(
+        hintText: 'e.g. Production AWS',
+        hintStyle: GoogleFonts.spaceGrotesk(color: mutedColor.withValues(alpha: 0.5)),
+        prefixIcon: Icon(Icons.label_outline, color: mutedColor, size: 20),
+        filled: true,
+        fillColor: inputColor,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
-        Positioned(
-          left: 16,
-          top: -8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            color: colorScheme.surface,
-            child: Text(
-              label,
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1,
-                color: colorScheme.primary,
-              ),
-            ),
-          ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
-      ],
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.primary),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Please enter a name';
+        }
+        return null;
+      },
     );
   }
 
@@ -542,104 +418,40 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     );
   }
 
-  Widget _buildTimeoutInput() {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
-    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
-    return Stack(
-      children: [
-        TextFormField(
-          controller: _timeoutController,
-          keyboardType: TextInputType.number,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
-          decoration: InputDecoration(
-            hintText: '10',
-            hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
-            filled: true,
-            fillColor: inputColor,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.primary),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          ),
-        ),
-        Positioned(
-          right: 8,
-          top: 0,
-          bottom: 0,
-          child: Center(
-            child: Text(
-              's',
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 10,
-                color: mutedColor,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildUsernameInput() {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
     final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
-    return Stack(
-      children: [
-        TextFormField(
-          controller: _usernameController,
-          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
-          decoration: InputDecoration(
-            hintText: 'root',
-            hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
-            prefixIcon: Icon(Icons.person_outline, color: mutedColor, size: 20),
-            filled: true,
-            fillColor: inputColor,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.primary),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          ),
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Please enter a username';
-            }
-            return null;
-          },
+    return TextFormField(
+      controller: _usernameController,
+      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
+      decoration: InputDecoration(
+        hintText: 'root',
+        hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
+        prefixIcon: Icon(Icons.person_outline, color: mutedColor, size: 20),
+        filled: true,
+        fillColor: inputColor,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
-        Positioned(
-          right: 12,
-          top: 0,
-          bottom: 0,
-          child: Center(
-            child: Text(
-              'USER',
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 10,
-                color: mutedColor.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
         ),
-      ],
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.primary),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Please enter a username';
+        }
+        return null;
+      },
     );
   }
 
@@ -824,31 +636,6 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     );
   }
 
-  Widget _buildAdvancedToggle() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
-    return Center(
-      child: TextButton.icon(
-        onPressed: () {
-          // TODO: Show advanced options
-        },
-        icon: Text(
-          'Show Advanced Options',
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: mutedColor,
-          ),
-        ),
-        label: Icon(
-          Icons.expand_more,
-          size: 16,
-          color: mutedColor,
-        ),
-      ),
-    );
-  }
-
   Widget _buildBottomAction() {
     final colorScheme = Theme.of(context).colorScheme;
     return Positioned(
@@ -947,8 +734,6 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
         }
       }
 
-      final timeout = int.tryParse(_timeoutController.text) ?? 10;
-
       // SSH接続テスト
       await sshClient.connect(
         host: _hostController.text.trim(),
@@ -958,7 +743,6 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           password: password,
           privateKey: privateKey,
           passphrase: passphrase,
-          timeout: timeout,
         ),
       );
 
