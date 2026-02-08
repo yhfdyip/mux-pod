@@ -11,7 +11,7 @@ import '../theme/design_colors.dart';
 import 'connections/connections_screen.dart';
 import 'dashboard/dashboard_screen.dart';
 import 'keys/keys_screen.dart';
-import 'notifications/notification_rules_screen.dart';
+import 'notifications/notification_panes_screen.dart';
 import 'settings/settings_screen.dart';
 import 'terminal/terminal_screen.dart';
 
@@ -44,7 +44,7 @@ class HomeScreen extends ConsumerWidget {
           ConnectionsScreen(),        // 0: Servers
           KeysScreen(),               // 1: Keys
           DashboardScreen(),          // 2: Dashboard（中央）
-          NotificationRulesScreen(),  // 3: Notify
+          NotificationPanesScreen(),  // 3: Alerts
           SettingsScreen(),           // 4: Settings
         ],
       ),
