@@ -388,8 +388,10 @@ class _TerminalTabState extends ConsumerState<_TerminalTab> {
             options: options,
           );
 
-          final output = await sshClient.exec(TmuxCommands.listSessions());
-          final tmuxSessions = TmuxParser.parseSessions(output);
+          final result = await sshClient.execWithExitCode(TmuxCommands.listSessions());
+          final tmuxSessions = (result.exitCode == 0)
+              ? TmuxParser.parseSessions(result.stdout)
+              : <TmuxSession>[];
 
           // 切断
           await sshClient.disconnect();

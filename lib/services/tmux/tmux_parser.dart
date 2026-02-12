@@ -38,9 +38,9 @@ class TmuxParser {
   /// 単一のセッション行をパース
   static TmuxSession? parseSessionLine(String line, {String delimiter = defaultDelimiter}) {
     final parts = line.split(delimiter);
-    if (parts.isEmpty) return null;
+    // 区切り文字が含まれない行はtmux出力ではない（シェルエラー等）
+    if (parts.length < 2) return null;
 
-    // 最小フォーマット: name
     final name = parts[0];
     if (name.isEmpty) return null;
 
@@ -385,7 +385,9 @@ class TmuxParser {
     return !lower.contains('no server running') &&
         !lower.contains('error connecting') &&
         !lower.contains('failed to connect') &&
-        !lower.contains('command not found');
+        !lower.contains('command not found') &&
+        !lower.contains('no such file or directory') &&
+        !lower.contains('permission denied');
   }
 
   /// エラーメッセージを抽出

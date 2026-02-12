@@ -695,9 +695,14 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
 
       final cmd = TmuxCommands.listSessions();
       debugPrint('_fetchSessions: tmuxPath=${sshClient.tmuxPath}, cmd="$cmd"');
-      final output = await sshClient.exec(cmd);
-      debugPrint('_fetchSessions: output="${output.trim()}"');
-      final sessions = TmuxParser.parseSessions(output);
+      final result = await sshClient.execWithExitCode(cmd);
+      debugPrint('_fetchSessions: stdout="${result.stdout.trim()}", stderr="${result.stderr.trim()}", exitCode=${result.exitCode}');
+      if (result.exitCode != null && result.exitCode != 0) {
+        throw SshConnectionError(
+          result.stderr.isNotEmpty ? result.stderr.trim() : 'tmux command failed (exit code: ${result.exitCode})',
+        );
+      }
+      final sessions = TmuxParser.parseSessions(result.stdout);
       debugPrint('_fetchSessions: parsed ${sessions.length} sessions');
 
       // 切断

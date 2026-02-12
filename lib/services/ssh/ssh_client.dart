@@ -227,8 +227,21 @@ class SshClient {
 
       // tmuxパス検出（ユーザー指定があればそれを使用、なければ自動検出）
       if (options.tmuxPath != null && options.tmuxPath!.isNotEmpty) {
-        _tmuxPath = options.tmuxPath;
-        debugPrint('connect: using user-specified tmux path: $_tmuxPath');
+        // ユーザー指定パスの存在確認
+        final verifyExitCode = await _withExecLock(() async {
+          final session = await _client!.execute('test -x ${options.tmuxPath}');
+          await session.stdout.drain();
+          await session.stderr.drain();
+          final code = session.exitCode;
+          session.close();
+          return code;
+        });
+        if (verifyExitCode == 0) {
+          _tmuxPath = options.tmuxPath;
+          debugPrint('connect: user-specified tmux path verified: $_tmuxPath');
+        } else {
+          debugPrint('connect: user-specified tmux path not found: ${options.tmuxPath}');
+        }
       } else {
         await _detectTmuxPath();
       }
