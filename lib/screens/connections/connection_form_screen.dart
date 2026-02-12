@@ -33,6 +33,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   final _portController = TextEditingController(text: '22');
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _tmuxPathController = TextEditingController();
 
   String _authMethod = 'password';
   String? _selectedKeyId;
@@ -57,6 +58,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
       _usernameController.text = connection.username;
       _authMethod = connection.authMethod;
       _selectedKeyId = connection.keyId;
+      _tmuxPathController.text = connection.tmuxPath ?? '';
     }
   }
 
@@ -67,6 +69,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
     _portController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _tmuxPathController.dispose();
     super.dispose();
   }
 
@@ -229,6 +232,11 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              // tmux path
+              _buildFieldLabel('TMUX PATH (OPTIONAL)'),
+              const SizedBox(height: 8),
+              _buildTmuxPathInput(),
             ],
           ),
         ),
@@ -452,6 +460,56 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
         }
         return null;
       },
+    );
+  }
+
+  Widget _buildTmuxPathInput() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    final inputColor = isDark ? DesignColors.inputDark : DesignColors.inputLight;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _tmuxPathController,
+          style: GoogleFonts.jetBrainsMono(fontSize: 14, color: colorScheme.onSurface),
+          decoration: InputDecoration(
+            hintText: '/usr/bin/tmux (auto-detect if empty)',
+            hintStyle: GoogleFonts.jetBrainsMono(color: mutedColor.withValues(alpha: 0.5)),
+            prefixIcon: Icon(Icons.terminal_outlined, color: mutedColor, size: 20),
+            filled: true,
+            fillColor: inputColor,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.primary),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+          validator: (value) {
+            if (value != null && value.isNotEmpty && !value.startsWith('/')) {
+              return 'Absolute path required (e.g., /usr/bin/tmux)';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Leave empty for automatic detection',
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 11,
+            color: mutedColor.withValues(alpha: 0.7),
+          ),
+        ),
+      ],
     );
   }
 
@@ -735,6 +793,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
       }
 
       // SSH接続テスト
+      final customTmuxPath = _tmuxPathController.text.trim();
       await sshClient.connect(
         host: _hostController.text.trim(),
         port: int.tryParse(_portController.text) ?? 22,
@@ -743,6 +802,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
           password: password,
           privateKey: privateKey,
           passphrase: passphrase,
+          tmuxPath: customTmuxPath.isNotEmpty ? customTmuxPath : null,
         ),
       );
 
@@ -807,6 +867,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
         developer.log('Password saved successfully', name: 'ConnectionForm');
       }
 
+      final saveTmuxPath = _tmuxPathController.text.trim();
       final connection = Connection(
         id: connectionId,
         name: _nameController.text.trim(),
@@ -815,6 +876,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
         username: _usernameController.text.trim(),
         authMethod: _authMethod,
         keyId: _authMethod == 'key' ? _selectedKeyId : null,
+        tmuxPath: saveTmuxPath.isNotEmpty ? saveTmuxPath : null,
         createdAt: widget.isEditing
             ? ref.read(connectionsProvider.notifier).getById(connectionId)?.createdAt ?? DateTime.now()
             : DateTime.now(),

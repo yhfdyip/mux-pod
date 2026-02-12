@@ -373,10 +373,10 @@ class _TerminalTabState extends ConsumerState<_TerminalTab> {
           if (connection.authMethod == 'key' && connection.keyId != null) {
             final privateKey = await storage.getPrivateKey(connection.keyId!);
             final passphrase = await storage.getPassphrase(connection.keyId!);
-            options = SshConnectOptions(privateKey: privateKey, passphrase: passphrase);
+            options = SshConnectOptions(privateKey: privateKey, passphrase: passphrase, tmuxPath: connection.tmuxPath);
           } else {
             final password = await storage.getPassword(connection.id);
-            options = SshConnectOptions(password: password);
+            options = SshConnectOptions(password: password, tmuxPath: connection.tmuxPath);
           }
 
           // SSH接続してセッション一覧を取得

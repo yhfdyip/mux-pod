@@ -41,6 +41,9 @@ class SshConnectOptions {
   /// 秘密鍵のパスフレーズ
   final String? passphrase;
 
+  /// ユーザー指定のtmuxパス（nullなら自動検出）
+  final String? tmuxPath;
+
   /// 接続タイムアウト（秒）
   final int timeout;
 
@@ -48,6 +51,7 @@ class SshConnectOptions {
     this.password,
     this.privateKey,
     this.passphrase,
+    this.tmuxPath,
     this.timeout = 30,
   });
 }
@@ -221,8 +225,13 @@ class SshClient {
       _state = SshConnectionState.connected;
       _connectionStateController.add(_state);
 
-      // tmuxパス検出（execチャネル経由、PersistentShellに依存しない）
-      await _detectTmuxPath();
+      // tmuxパス検出（ユーザー指定があればそれを使用、なければ自動検出）
+      if (options.tmuxPath != null && options.tmuxPath!.isNotEmpty) {
+        _tmuxPath = options.tmuxPath;
+        debugPrint('connect: using user-specified tmux path: $_tmuxPath');
+      } else {
+        await _detectTmuxPath();
+      }
 
       // 持続的シェルを開始（ポーリング用）
       await _startPersistentShell();

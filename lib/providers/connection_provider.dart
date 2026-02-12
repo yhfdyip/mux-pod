@@ -13,6 +13,7 @@ class Connection {
   final String username;
   final String authMethod; // 'password' | 'key'
   final String? keyId;
+  final String? tmuxPath;
   final DateTime createdAt;
   final DateTime? lastConnectedAt;
 
@@ -24,6 +25,7 @@ class Connection {
     required this.username,
     this.authMethod = 'password',
     this.keyId,
+    this.tmuxPath,
     required this.createdAt,
     this.lastConnectedAt,
   });
@@ -36,6 +38,7 @@ class Connection {
     String? username,
     String? authMethod,
     String? keyId,
+    String? tmuxPath,
     DateTime? createdAt,
     DateTime? lastConnectedAt,
   }) {
@@ -47,6 +50,7 @@ class Connection {
       username: username ?? this.username,
       authMethod: authMethod ?? this.authMethod,
       keyId: keyId ?? this.keyId,
+      tmuxPath: tmuxPath ?? this.tmuxPath,
       createdAt: createdAt ?? this.createdAt,
       lastConnectedAt: lastConnectedAt ?? this.lastConnectedAt,
     );
@@ -61,6 +65,7 @@ class Connection {
       'username': username,
       'authMethod': authMethod,
       'keyId': keyId,
+      'tmuxPath': tmuxPath,
       'createdAt': createdAt.toIso8601String(),
       'lastConnectedAt': lastConnectedAt?.toIso8601String(),
     };
@@ -75,6 +80,7 @@ class Connection {
       username: json['username'] as String,
       authMethod: json['authMethod'] as String? ?? 'password',
       keyId: json['keyId'] as String?,
+      tmuxPath: json['tmuxPath'] as String?,
       createdAt: DateTime.parse(json['createdAt'] as String),
       lastConnectedAt: json['lastConnectedAt'] != null
           ? DateTime.parse(json['lastConnectedAt'] as String)
