@@ -117,6 +117,16 @@ if [[ -n "$EXPORT_OPTIONS" ]]; then
   FLUTTER_ARGS+=(--export-options-plist "$EXPORT_OPTIONS")
 fi
 
+# Version info via --dart-define
+if [[ -n "${APP_VERSION:-}" ]]; then
+  FLUTTER_ARGS+=(--dart-define "APP_VERSION=${APP_VERSION}")
+fi
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+if [[ -n "$GIT_BRANCH" && -n "$GIT_HASH" ]]; then
+  FLUTTER_ARGS+=(--dart-define "GIT_REF=${GIT_BRANCH}@${GIT_HASH}")
+fi
+
 flutter "${FLUTTER_ARGS[@]}"
 
 # Output location

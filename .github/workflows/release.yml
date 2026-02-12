@@ -55,7 +55,12 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        run: flutter build apk --release
+        run: |
+          VERSION="${{ github.ref_name }}"
+          GIT_REF="${{ github.ref_name }}@$(echo '${{ github.sha }}' | cut -c1-7)"
+          flutter build apk --release \
+            --dart-define=APP_VERSION=$VERSION \
+            --dart-define=GIT_REF=$GIT_REF
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

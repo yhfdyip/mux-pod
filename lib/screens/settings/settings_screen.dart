@@ -9,6 +9,7 @@ import '../../widgets/dialogs/font_size_dialog.dart';
 import '../../widgets/dialogs/font_family_dialog.dart';
 import '../../widgets/dialogs/min_font_size_dialog.dart';
 import '../../widgets/dialogs/theme_dialog.dart';
+import '../../services/version_info.dart';
 import 'licenses_screen.dart';
 
 /// 設定画面
@@ -148,10 +149,10 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 const Divider(),
                 const _SectionHeader(title: 'About'),
-                const ListTile(
-                  leading: Icon(Icons.info),
-                  title: Text('Version'),
-                  subtitle: Text('1.0.0'),
+                ListTile(
+                  leading: const Icon(Icons.info),
+                  title: const Text('Version'),
+                  subtitle: Text(VersionInfo.version),
                 ),
                 ListTile(
                   leading: const Icon(Icons.code),

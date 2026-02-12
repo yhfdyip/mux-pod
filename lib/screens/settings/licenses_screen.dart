@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../services/version_info.dart';
+
 /// ライセンス一覧画面
 class LicensesScreen extends StatelessWidget {
   const LicensesScreen({super.key});
@@ -8,9 +10,9 @@ class LicensesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Theme(
       data: Theme.of(context),
-      child: const LicensePage(
+      child: LicensePage(
         applicationName: 'MuxPod',
-        applicationVersion: '1.0.0',
+        applicationVersion: VersionInfo.version,
         applicationLegalese: '© 2025 mox',
       ),
     );
