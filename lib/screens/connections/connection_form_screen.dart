@@ -747,16 +747,8 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
       );
 
       // tmuxがインストールされているか確認
-      try {
-        final result = await sshClient.execWithExitCode(
-          'which tmux',
-          timeout: const Duration(seconds: 5),
-        );
-        tmuxInstalled = result.exitCode == 0 && result.stdout.trim().isNotEmpty;
-      } catch (e) {
-        // tmux確認に失敗しても接続自体は成功
-        developer.log('Failed to check tmux: $e', name: 'ConnectionForm');
-      }
+      // connect()内でPersistentShell（対話シェル）経由で絶対パスを検出済み
+      tmuxInstalled = sshClient.tmuxPath != null;
     } on SshAuthenticationError catch (e) {
       errorMessage = 'Authentication failed: ${e.message}';
     } on SshConnectionError catch (e) {

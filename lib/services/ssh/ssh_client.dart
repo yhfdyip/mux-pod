@@ -125,6 +125,12 @@ class SshClient {
   /// 持続的シェルセッション（ポーリング用）
   PersistentShell? _persistentShell;
 
+  /// 検出されたtmuxバイナリの絶対パス
+  String? _tmuxPath;
+
+  /// tmuxの絶対パス（未検出なら null）
+  String? get tmuxPath => _tmuxPath;
+
   /// Keep-aliveタイマー
   Timer? _keepAliveTimer;
 
@@ -328,6 +334,7 @@ class SshClient {
     try {
       _persistentShell = PersistentShell(_client!);
       await _persistentShell!.start();
+      await _detectTmuxPath();
     } catch (e) {
       // 持続的シェルの開始に失敗しても接続自体は継続
       // 従来のexec()メソッドにフォールバック
@@ -343,9 +350,40 @@ class SshClient {
       await _persistentShell?.dispose();
       _persistentShell = PersistentShell(_client!);
       await _persistentShell!.start();
+      await _detectTmuxPath();
     } catch (e) {
       _persistentShell = null;
     }
+  }
+
+  /// PersistentShell（対話シェル）経由でtmuxの絶対パスを検出
+  ///
+  /// 対話シェルはユーザーのプロファイルが読み込まれるため、
+  /// ログインシェルがbash/zsh/fish何であってもフルPATHで検索可能。
+  Future<void> _detectTmuxPath() async {
+    if (_persistentShell == null || !_persistentShell!.isStarted) return;
+
+    try {
+      final result = await _persistentShell!.exec(
+        'command -v tmux',
+        timeout: const Duration(seconds: 3),
+      );
+      final path = result.trim();
+      if (path.isNotEmpty && path.startsWith('/')) {
+        _tmuxPath = path;
+      }
+    } catch (_) {
+      // 検出失敗時は tmux をそのまま使用（フォールバック）
+    }
+  }
+
+  /// コマンド内の `tmux` を検出済み絶対パスに置換
+  String _resolveTmuxCommand(String command) {
+    if (_tmuxPath == null) return command;
+    return command.replaceAllMapped(
+      RegExp(r'(^|;\s*)tmux\b'),
+      (m) => '${m[1]}$_tmuxPath',
+    );
   }
 
   /// Keep-aliveを開始
@@ -518,7 +556,8 @@ class SshClient {
     }
 
     try {
-      final session = await _client!.execute(command);
+      final resolvedCommand = _resolveTmuxCommand(command);
+      final session = await _client!.execute(resolvedCommand);
 
       // 出力を収集（バイト列として収集し、最後にデコード）
       final stdoutBytes = <int>[];
@@ -585,26 +624,28 @@ class SshClient {
       throw SshConnectionError('Not connected');
     }
 
+    final resolvedCommand = _resolveTmuxCommand(command);
+
     // 持続的シェルが利用できない場合は従来のexec()にフォールバック
     if (_persistentShell == null || !_persistentShell!.isStarted) {
-      return exec(command, timeout: timeout);
+      return exec(resolvedCommand, timeout: timeout);
     }
 
     try {
-      return await _persistentShell!.exec(command, timeout: timeout);
+      return await _persistentShell!.exec(resolvedCommand, timeout: timeout);
     } on PersistentShellError catch (e) {
       // シェルセッションが切断された場合は再起動を試みる
       if (e.message.contains('closed') || e.message.contains('disposed')) {
         try {
           await restartPersistentShell();
-          return await _persistentShell!.exec(command, timeout: timeout);
+          return await _persistentShell!.exec(resolvedCommand, timeout: timeout);
         } catch (_) {
           // 再起動も失敗した場合は従来のexec()にフォールバック
-          return exec(command, timeout: timeout);
+          return exec(resolvedCommand, timeout: timeout);
         }
       }
       // その他のエラーは従来のexec()にフォールバック
-      return exec(command, timeout: timeout);
+      return exec(resolvedCommand, timeout: timeout);
     }
   }
 
@@ -621,7 +662,8 @@ class SshClient {
     }
 
     try {
-      final session = await _client!.execute(command);
+      final resolvedCommand = _resolveTmuxCommand(command);
+      final session = await _client!.execute(resolvedCommand);
 
       final stdout = StringBuffer();
       final stderr = StringBuffer();
