@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -128,6 +129,9 @@ class SshClient {
   /// 検出されたtmuxバイナリの絶対パス
   String? _tmuxPath;
 
+  /// execチャネル排他制御用ロック
+  Completer<void>? _execLock;
+
   /// tmuxの絶対パス（未検出なら null）
   String? get tmuxPath => _tmuxPath;
 
@@ -216,6 +220,9 @@ class SshClient {
 
       _state = SshConnectionState.connected;
       _connectionStateController.add(_state);
+
+      // tmuxパス検出（execチャネル経由、PersistentShellに依存しない）
+      await _detectTmuxPath();
 
       // 持続的シェルを開始（ポーリング用）
       await _startPersistentShell();
@@ -334,7 +341,6 @@ class SshClient {
     try {
       _persistentShell = PersistentShell(_client!);
       await _persistentShell!.start();
-      await _detectTmuxPath();
     } catch (e) {
       // 持続的シェルの開始に失敗しても接続自体は継続
       // 従来のexec()メソッドにフォールバック
@@ -350,40 +356,97 @@ class SshClient {
       await _persistentShell?.dispose();
       _persistentShell = PersistentShell(_client!);
       await _persistentShell!.start();
-      await _detectTmuxPath();
     } catch (e) {
       _persistentShell = null;
     }
   }
 
-  /// PersistentShell（対話シェル）経由でtmuxの絶対パスを検出
-  ///
-  /// 対話シェルはユーザーのプロファイルが読み込まれるため、
-  /// ログインシェルがbash/zsh/fish何であってもフルPATHで検索可能。
-  Future<void> _detectTmuxPath() async {
-    if (_persistentShell == null || !_persistentShell!.isStarted) return;
-
+  /// execチャネルを排他的に使用する
+  Future<T> _withExecLock<T>(Future<T> Function() fn) async {
+    while (_execLock != null) {
+      await _execLock!.future;
+    }
+    final completer = Completer<void>();
+    _execLock = completer;
     try {
-      final result = await _persistentShell!.exec(
-        'command -v tmux',
-        timeout: const Duration(seconds: 3),
-      );
-      final path = result.trim();
+      return await fn();
+    } finally {
+      _execLock = null;
+      completer.complete();
+    }
+  }
+
+  /// execチャネル経由でtmuxの絶対パスを検出
+  ///
+  /// Step 1: ログインシェル経由で `command -v tmux` を実行
+  /// Step 2: 失敗時、既知の候補パスで `test -x` フォールバック
+  Future<void> _detectTmuxPath() async {
+    if (_client == null || !isConnected) return;
+
+    // Step 1: ログインシェル経由で検出
+    try {
+      final path = await _withExecLock(() async {
+        final session = await _client!.execute(
+          r"$SHELL -lc 'command -v tmux'",
+        );
+        final stdoutBytes = <int>[];
+        await session.stdout.forEach((data) => stdoutBytes.addAll(data));
+        await session.stderr.drain();
+        session.close();
+        return utf8.decode(stdoutBytes, allowMalformed: true).trim();
+      });
       if (path.isNotEmpty && path.startsWith('/')) {
         _tmuxPath = path;
+        debugPrint('_detectTmuxPath: found via login shell: $path');
+        return;
       }
-    } catch (_) {
-      // 検出失敗時は tmux をそのまま使用（フォールバック）
+    } catch (e) {
+      debugPrint('_detectTmuxPath: login shell detection failed: $e');
     }
+
+    // Step 2: 既知パスのフォールバック
+    const candidates = [
+      '/opt/homebrew/bin/tmux',
+      '/usr/local/bin/tmux',
+      '/usr/bin/tmux',
+    ];
+
+    for (final candidate in candidates) {
+      try {
+        final exitCode = await _withExecLock(() async {
+          final session = await _client!.execute('test -x $candidate');
+          await session.stdout.drain();
+          await session.stderr.drain();
+          final code = session.exitCode;
+          session.close();
+          return code;
+        });
+        if (exitCode == 0) {
+          _tmuxPath = candidate;
+          debugPrint('_detectTmuxPath: found via fallback: $candidate');
+          return;
+        }
+      } catch (e) {
+        debugPrint('_detectTmuxPath: error checking $candidate: $e');
+      }
+    }
+    debugPrint('_detectTmuxPath: tmux not found');
   }
 
   /// コマンド内の `tmux` を検出済み絶対パスに置換
   String _resolveTmuxCommand(String command) {
-    if (_tmuxPath == null) return command;
-    return command.replaceAllMapped(
+    if (_tmuxPath == null) {
+      debugPrint('_resolveTmuxCommand: _tmuxPath=null, command unchanged');
+      return command;
+    }
+    final resolved = command.replaceAllMapped(
       RegExp(r'(^|;\s*)tmux\b'),
       (m) => '${m[1]}$_tmuxPath',
     );
+    if (resolved != command) {
+      debugPrint('_resolveTmuxCommand: "$command" => "$resolved"');
+    }
+    return resolved;
   }
 
   /// Keep-aliveを開始
@@ -557,56 +620,62 @@ class SshClient {
 
     try {
       final resolvedCommand = _resolveTmuxCommand(command);
-      final session = await _client!.execute(resolvedCommand);
+      return await _withExecLock(() async {
+        final session = await _client!.execute(resolvedCommand);
 
-      // 出力を収集（バイト列として収集し、最後にデコード）
-      final stdoutBytes = <int>[];
-      final stderrBytes = <int>[];
+        // 出力を収集（バイト列として収集し、最後にデコード）
+        final stdoutBytes = <int>[];
+        final stderrBytes = <int>[];
 
-      final stdoutCompleter = Completer<void>();
-      final stderrCompleter = Completer<void>();
+        final stdoutCompleter = Completer<void>();
+        final stderrCompleter = Completer<void>();
 
-      session.stdout.listen(
-        (data) => stdoutBytes.addAll(data),
-        onDone: () => stdoutCompleter.complete(),
-        onError: (e) => stdoutCompleter.completeError(e),
-      );
+        session.stdout.listen(
+          (data) => stdoutBytes.addAll(data),
+          onDone: () => stdoutCompleter.complete(),
+          onError: (e) => stdoutCompleter.completeError(e),
+        );
 
-      session.stderr.listen(
-        (data) => stderrBytes.addAll(data),
-        onDone: () => stderrCompleter.complete(),
-        onError: (e) => stderrCompleter.completeError(e),
-      );
+        session.stderr.listen(
+          (data) => stderrBytes.addAll(data),
+          onDone: () => stderrCompleter.complete(),
+          onError: (e) => stderrCompleter.completeError(e),
+        );
 
-      // タイムアウト付きで完了を待機
-      if (timeout != null) {
-        await Future.wait([
-          stdoutCompleter.future,
-          stderrCompleter.future,
-        ]).timeout(timeout);
-      } else {
-        await Future.wait([
-          stdoutCompleter.future,
-          stderrCompleter.future,
-        ]);
-      }
+        // タイムアウト付きで完了を待機
+        if (timeout != null) {
+          await Future.wait([
+            stdoutCompleter.future,
+            stderrCompleter.future,
+          ]).timeout(timeout);
+        } else {
+          await Future.wait([
+            stdoutCompleter.future,
+            stderrCompleter.future,
+          ]);
+        }
 
-      session.close();
+        session.close();
 
-      // バイト列をUTF-8デコード（不正なバイトは置換文字に）
-      final stdout = utf8.decode(stdoutBytes, allowMalformed: true);
-      final stderr = utf8.decode(stderrBytes, allowMalformed: true);
+        // バイト列をUTF-8デコード（不正なバイトは置換文字に）
+        final stdout = utf8.decode(stdoutBytes, allowMalformed: true);
+        final stderr = utf8.decode(stderrBytes, allowMalformed: true);
 
-      // stderrがあればエラーとして扱う（オプション）
-      if (stderr.isNotEmpty) {
-        // stderrも結果に含める（tmuxコマンドなどはstderrに出力することがある）
-        return stdout + stderr;
-      }
+        // stderrがあればエラーとして扱う（オプション）
+        if (stderr.isNotEmpty) {
+          // stderrも結果に含める（tmuxコマンドなどはstderrに出力することがある）
+          debugPrint('exec: stdout="${stdout.trim()}", stderr="${stderr.trim()}"');
+          return stdout + stderr;
+        }
 
-      return stdout;
+        debugPrint('exec: stdout="${stdout.trim()}"');
+        return stdout;
+      });
     } on TimeoutException {
+      debugPrint('exec: timed out');
       throw SshConnectionError('Command execution timed out');
     } catch (e) {
+      debugPrint('exec: error=$e');
       throw SshConnectionError('Failed to execute command: $e', e);
     }
   }
@@ -663,46 +732,48 @@ class SshClient {
 
     try {
       final resolvedCommand = _resolveTmuxCommand(command);
-      final session = await _client!.execute(resolvedCommand);
+      return await _withExecLock(() async {
+        final session = await _client!.execute(resolvedCommand);
 
-      final stdout = StringBuffer();
-      final stderr = StringBuffer();
+        final stdout = StringBuffer();
+        final stderr = StringBuffer();
 
-      final stdoutCompleter = Completer<void>();
-      final stderrCompleter = Completer<void>();
+        final stdoutCompleter = Completer<void>();
+        final stderrCompleter = Completer<void>();
 
-      session.stdout.listen(
-        (data) => stdout.write(utf8.decode(data)),
-        onDone: () => stdoutCompleter.complete(),
-        onError: (e) => stdoutCompleter.completeError(e),
-      );
+        session.stdout.listen(
+          (data) => stdout.write(utf8.decode(data)),
+          onDone: () => stdoutCompleter.complete(),
+          onError: (e) => stdoutCompleter.completeError(e),
+        );
 
-      session.stderr.listen(
-        (data) => stderr.write(utf8.decode(data)),
-        onDone: () => stderrCompleter.complete(),
-        onError: (e) => stderrCompleter.completeError(e),
-      );
+        session.stderr.listen(
+          (data) => stderr.write(utf8.decode(data)),
+          onDone: () => stderrCompleter.complete(),
+          onError: (e) => stderrCompleter.completeError(e),
+        );
 
-      if (timeout != null) {
-        await Future.wait([
-          stdoutCompleter.future,
-          stderrCompleter.future,
-        ]).timeout(timeout);
-      } else {
-        await Future.wait([
-          stdoutCompleter.future,
-          stderrCompleter.future,
-        ]);
-      }
+        if (timeout != null) {
+          await Future.wait([
+            stdoutCompleter.future,
+            stderrCompleter.future,
+          ]).timeout(timeout);
+        } else {
+          await Future.wait([
+            stdoutCompleter.future,
+            stderrCompleter.future,
+          ]);
+        }
 
-      final exitCode = session.exitCode;
-      session.close();
+        final exitCode = session.exitCode;
+        session.close();
 
-      return (
-        stdout: stdout.toString(),
-        stderr: stderr.toString(),
-        exitCode: exitCode,
-      );
+        return (
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
+          exitCode: exitCode,
+        );
+      });
     } on TimeoutException {
       throw SshConnectionError('Command execution timed out');
     } catch (e) {

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// tmuxコマンド出力パーサー
 ///
 /// tmuxコマンドの出力をパースしてオブジェクトに変換する。
@@ -12,6 +14,12 @@ class TmuxParser {
   ///
   /// 対応フォーマット: `#{session_name}\t#{session_created}\t#{session_attached}\t#{session_windows}\t#{session_id}`
   static List<TmuxSession> parseSessions(String output, {String delimiter = defaultDelimiter}) {
+    debugPrint('parseSessions: raw output="${output.trim()}"');
+    if (!isServerRunning(output)) {
+      debugPrint('parseSessions: isServerRunning=false, returning empty');
+      return [];
+    }
+
     final sessions = <TmuxSession>[];
 
     for (final line in output.split('\n')) {
@@ -49,6 +57,8 @@ class TmuxParser {
   ///
   /// フォーマット: `#{session_name}:#{session_windows}:#{session_attached}`
   static List<TmuxSession> parseSessionsSimple(String output) {
+    if (!isServerRunning(output)) return [];
+
     final sessions = <TmuxSession>[];
 
     for (final line in output.split('\n')) {
@@ -233,6 +243,12 @@ class TmuxParser {
   ///
   /// `tmux list-panes -a -F "..."`の出力から完全なツリーを構築
   static List<TmuxSession> parseFullTree(String output, {String delimiter = defaultDelimiter}) {
+    debugPrint('parseFullTree: raw output="${output.trim()}"');
+    if (!isServerRunning(output)) {
+      debugPrint('parseFullTree: isServerRunning=false, returning empty');
+      return [];
+    }
+
     final sessionsMap = <String, TmuxSession>{};
     final windowsMap = <String, Map<int, TmuxWindow>>{};
 
@@ -365,11 +381,11 @@ class TmuxParser {
 
   /// tmuxが実行中かチェック（サーバー起動確認）
   static bool isServerRunning(String output) {
-    // "no server running" や "error" が含まれていないことを確認
     final lower = output.toLowerCase();
     return !lower.contains('no server running') &&
         !lower.contains('error connecting') &&
-        !lower.contains('failed to connect');
+        !lower.contains('failed to connect') &&
+        !lower.contains('command not found');
   }
 
   /// エラーメッセージを抽出

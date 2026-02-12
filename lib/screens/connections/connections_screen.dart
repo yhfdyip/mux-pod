@@ -693,8 +693,12 @@ class _ConnectionCardState extends ConsumerState<_ConnectionCard> {
         options: options,
       );
 
-      final output = await sshClient.exec(TmuxCommands.listSessions());
+      final cmd = TmuxCommands.listSessions();
+      debugPrint('_fetchSessions: tmuxPath=${sshClient.tmuxPath}, cmd="$cmd"');
+      final output = await sshClient.exec(cmd);
+      debugPrint('_fetchSessions: output="${output.trim()}"');
       final sessions = TmuxParser.parseSessions(output);
+      debugPrint('_fetchSessions: parsed ${sessions.length} sessions');
 
       // 切断
       await sshClient.disconnect();
