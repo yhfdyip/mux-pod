@@ -1,19 +1,16 @@
-name: Build Unsigned IPA
+name: Build and Release IPA
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    tags:
+      - 'v*'
 
 jobs:
-  build-unsigned-ipa:
+  build:
     runs-on: macos-15
     timeout-minutes: 60
+    permissions:
+      contents: write
     env:
       COCOAPODS_DISABLE_STATS: 'true'
       SPM_CACHE_PATH: ~/Library/Developer/Xcode/DerivedData/SourcePackages
@@ -134,7 +131,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Runnerdev.xcarchive" \
+            -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
             -clonedSourcePackagesDirPath "$SPM_CACHE_PATH" \
             -parallelizeTargets \
             -jobs "$(sysctl -n hw.ncpu)" \
@@ -158,12 +155,10 @@ jobs:
           cp -R "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/"
 
           cd "$RUNNER_TEMP/ipa"
-          zip -r -y "$GITHUB_WORKSPACE/Runner-unsigned.ipa" Payload
+          zip -r -y "$GITHUB_WORKSPACE/Mux-unsigned.ipa" Payload
 
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: mux-app-unsigned-ipa
-          path: Mux-unsigned.ipa
-          if-no-files-found: error
-          retention-days: 14
+          files: Mux-unsigned.ipa
+          generate_release_notes: true
