@@ -118,17 +118,17 @@ class AdaptivePollingInterval {
   /// 最小ポーリング間隔（ミリ秒）
   static const int minInterval = 50;
 
-  /// 最大ポーリング間隔（ミリ秒）
-  static const int maxInterval = 500;
+  /// 最大ポーリング間隔（ミリ秒）-- アイドル時
+  static const int maxInterval = 2000;
 
   /// デフォルトポーリング間隔（ミリ秒）
   static const int defaultInterval = 100;
 
   /// 高頻度更新閾値（この回数以下の変更なしフレームで高頻度モード）
-  static const int highFrequencyThreshold = 5;
+  static const int highFrequencyThreshold = 3;
 
   /// 低頻度更新閾値（この回数以上の変更なしフレームで低頻度モード）
-  static const int lowFrequencyThreshold = 30;
+  static const int lowFrequencyThreshold = 15;
 
   /// 現在のポーリング間隔を計算
   ///

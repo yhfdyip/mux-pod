@@ -165,6 +165,11 @@ class TmuxNotifier extends Notifier<TmuxState> {
 
   /// カーソル位置を更新
   void updateCursorPosition(String paneId, int x, int y) {
+    // 変更がない場合はディープコピーを回避してスキップ
+    final currentPane = state.activePane;
+    if (currentPane == null || currentPane.id != paneId) return;
+    if (currentPane.cursorX == x && currentPane.cursorY == y) return;
+
     final sessions = state.sessions.map((session) {
       final windows = session.windows.map((window) {
         final panes = window.panes.map((pane) {

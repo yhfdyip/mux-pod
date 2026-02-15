@@ -47,7 +47,8 @@ class TerminalScreen extends ConsumerStatefulWidget {
   ConsumerState<TerminalScreen> createState() => _TerminalScreenState();
 }
 
-class _TerminalScreenState extends ConsumerState<TerminalScreen> {
+class _TerminalScreenState extends ConsumerState<TerminalScreen>
+    with WidgetsBindingObserver {
   final _secureStorage = SecureStorageService();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _ansiTextViewKey = GlobalKey<AnsiTextViewState>();
@@ -78,7 +79,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   // 適応型ポーリング用
   int _currentPollingInterval = 100;
   static const int _minPollingInterval = 50;
-  static const int _maxPollingInterval = 500;
+  static const int _maxPollingInterval = 2000;
 
   // 選択状態保持用（コピペモード中の更新抑制）
   String _bufferedContent = '';
@@ -104,6 +105,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   // 入力キュー（切断中の入力を保持）
   final _inputQueue = InputQueue();
 
+  // バックグラウンド状態
+  bool _isInBackground = false;
+
+  // directInput設定のローカルキャッシュ（ref.watch回避）
+  bool _directInputEnabled = true;
+
   // Riverpodリスナー
   ProviderSubscription<SshState>? _sshSubscription;
   ProviderSubscription<TmuxState>? _tmuxSubscription;
@@ -113,6 +120,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     // 次フレームでリスナーを設定（ref使用のため）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -121,6 +129,42 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       _connectAndSetup();
       _applyKeepScreenOn();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        _pausePolling();
+        break;
+      case AppLifecycleState.resumed:
+        _resumePolling();
+        break;
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
+  /// バックグラウンド移行時にポーリングを停止
+  void _pausePolling() {
+    _isInBackground = true;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _treeRefreshTimer?.cancel();
+    _treeRefreshTimer = null;
+    WakelockPlus.disable();
+  }
+
+  /// フォアグラウンド復帰時にポーリングを再開
+  void _resumePolling() {
+    if (!_isInBackground || _isDisposed) return;
+    _isInBackground = false;
+    _startPolling();
+    _startTreeRefresh();
+    _applyKeepScreenOn();
   }
 
   /// Keep screen on設定を適用
@@ -147,38 +191,55 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
       fireImmediately: true,
     );
 
-    // Tmux状態の変化を監視（UIリビルド用）
+    // Tmux状態の変化を監視（構造変更時のみリビルド）
     _tmuxSubscription = ref.listenManual<TmuxState>(
       tmuxProvider,
       (previous, next) {
         if (!mounted || _isDisposed) return;
-        setState(() {
-          // tmuxStateはbuild内で直接読み取る
-        });
+        // セッション/ウィンドウ/ペインの構造変更がある場合のみリビルド
+        // カーソル位置の変更はポーリング時の_applyUpdateでカバーされる
+        final structureChanged =
+            previous?.activeSessionName != next.activeSessionName ||
+            previous?.activeWindowIndex != next.activeWindowIndex ||
+            previous?.activePaneId != next.activePaneId ||
+            previous?.sessions.length != next.sessions.length;
+        if (structureChanged) {
+          setState(() {});
+        }
       },
       fireImmediately: true,
     );
 
-    // 設定の変化を監視（Keep screen on用）
+    // 設定の変化を監視（Keep screen on / directInput用）
     _settingsSubscription = ref.listenManual<AppSettings>(
       settingsProvider,
       (previous, next) {
         if (!mounted || _isDisposed) return;
-        // keepScreenOn設定が変更された場合に適用
         if (previous?.keepScreenOn != next.keepScreenOn) {
           _applyKeepScreenOn();
+        }
+        if (previous?.directInputEnabled != next.directInputEnabled) {
+          setState(() {
+            _directInputEnabled = next.directInputEnabled;
+          });
         }
       },
       fireImmediately: false,
     );
 
-    // ネットワーク状態の変化を監視
+    // 初期値を明示的に設定
+    _directInputEnabled = ref.read(settingsProvider).directInputEnabled;
+
+    // ネットワーク状態の変化を監視（実際の接続状態変化時のみ更新）
     _networkSubscription = ref.listenManual<AsyncValue<NetworkStatus>>(
       networkStatusProvider,
       (previous, next) {
         if (!mounted || _isDisposed) return;
-        // UI更新のためにsetStateを呼ぶ
-        setState(() {});
+        final prevStatus = previous?.value;
+        final nextStatus = next.value;
+        if (prevStatus != nextStatus) {
+          setState(() {});
+        }
       },
       fireImmediately: true,
     );
@@ -372,12 +433,17 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     }
   }
 
-  /// 5秒ごとにセッションツリーを更新
+  /// 10秒ごとにセッションツリーを更新
   void _startTreeRefresh() {
     _treeRefreshTimer?.cancel();
     _treeRefreshTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _refreshSessionTree(),
+      const Duration(seconds: 10),
+      (_) {
+        // ポーリング中はSSH競合を回避するためスキップ
+        if (!_isPolling) {
+          _refreshSessionTree();
+        }
+      },
     );
   }
 
@@ -403,6 +469,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
         _scheduleNextPoll();
       },
     );
+  }
+
+  /// キー入力後にポーリングを即座にブースト（アイドル時の応答性改善）
+  void _boostPolling() {
+    _currentPollingInterval = _minPollingInterval;
+    _pollTimer?.cancel();
+    _scheduleNextPoll();
   }
 
   /// ポーリング間隔を更新
@@ -643,6 +716,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   void dispose() {
     // まず_isDisposedをセットして非同期処理を停止
     _isDisposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     // WakeLockを無効化
     WakelockPlus.disable();
     // 再接続成功コールバックをクリア
@@ -722,7 +796,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
                 onKeyPressed: _sendKey,
                 onSpecialKeyPressed: _sendSpecialKey,
                 onInputTap: _showInputDialog,
-                directInputEnabled: ref.watch(settingsProvider).directInputEnabled,
+                directInputEnabled: _directInputEnabled,
                 onDirectInputToggle: () {
                   ref.read(settingsProvider.notifier).toggleDirectInput();
                 },
@@ -773,6 +847,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       // エスケープシーケンスや特殊キーはリテラルで送信
       await sshClient.exec(TmuxCommands.sendKeys(target, data, literal: true));
+      _boostPolling();
     } catch (_) {
       // キー送信エラーは静かに無視
     }
@@ -1901,6 +1976,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
 
     try {
       await sshClient.exec(TmuxCommands.sendKeys(target, key, literal: literal));
+      _boostPolling();
     } catch (_) {
       // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
@@ -1919,6 +1995,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
     try {
       // 特殊キーはリテラルではなくtmux形式で送信
       await sshClient.exec(TmuxCommands.sendKeys(target, tmuxKey, literal: false));
+      _boostPolling();
     } catch (_) {
       // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
