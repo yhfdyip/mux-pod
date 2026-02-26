@@ -16,6 +16,7 @@ import '../../services/keychain/secure_storage.dart';
 import '../../services/network/network_monitor.dart';
 import '../../services/ssh/input_queue.dart';
 import '../../services/ssh/ssh_client.dart' show SshConnectOptions;
+import '../../services/tmux/pane_navigator.dart';
 import '../../services/tmux/tmux_commands.dart';
 import '../../services/tmux/tmux_parser.dart';
 import '../../theme/design_colors.dart';
@@ -869,6 +870,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                                   cursorX: cursor.x,
                                   cursorY: cursor.y,
                                   onArrowSwipe: _sendSpecialKey,
+                                  onTwoFingerSwipe: _handleTwoFingerSwipe,
+                                  navigableDirections: _getNavigableDirections(),
                                 );
                               },
                             );
@@ -926,6 +929,54 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       // 通常の文字はリテラル送信
       _sendKeyData(event.data);
     }
+  }
+
+  /// 2本指スワイプによるペイン切り替え
+  void _handleTwoFingerSwipe(SwipeDirection direction) {
+    final tmuxState = ref.read(tmuxProvider);
+    final window = tmuxState.activeWindow;
+    final activePane = tmuxState.activePane;
+    if (window == null || activePane == null) return;
+
+    // 設定に応じてスワイプ方向を反転
+    final settings = ref.read(settingsProvider);
+    final actualDirection = settings.invertPaneNavigation
+        ? direction.inverted
+        : direction;
+
+    final targetPane = PaneNavigator.findAdjacentPane(
+      panes: window.panes,
+      current: activePane,
+      direction: actualDirection,
+    );
+
+    if (targetPane != null) {
+      _selectPane(targetPane.id);
+    }
+  }
+
+  /// 現在のペインからナビゲーション可能な方向を取得
+  Map<SwipeDirection, bool>? _getNavigableDirections() {
+    final tmuxState = ref.read(tmuxProvider);
+    final window = tmuxState.activeWindow;
+    final activePane = tmuxState.activePane;
+    if (window == null || activePane == null) return null;
+
+    final rawDirections = PaneNavigator.getNavigableDirections(
+      panes: window.panes,
+      current: activePane,
+    );
+
+    // 反転設定が有効な場合、方向キーを入れ替える
+    final settings = ref.read(settingsProvider);
+    if (settings.invertPaneNavigation) {
+      return {
+        for (final dir in SwipeDirection.values)
+          dir: rawDirections[dir.inverted] ?? false,
+      };
+    }
+
+    return rawDirections;
   }
 
   /// キーデータをtmux send-keysで送信
