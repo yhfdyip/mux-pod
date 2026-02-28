@@ -133,7 +133,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   static const int _normalModeHistoryScreens = 4;
   static const int _normalModeHistoryLinesMin = 120;
   static const int _normalModeHistoryLinesMax = 600;
+  static const int _liveModeHistoryScreens = 1;
+  static const int _liveModeHistoryLinesMin = 40;
+  static const int _liveModeHistoryLinesMax = 200;
   static const int _scrollModeHistoryLines = 1000;
+  static const int _highFrequencyPollingThresholdMs = 80;
 
   // 手動スクロール中は更新頻度を落として負荷を下げる
   // （選択状態を守るため、表示内容の更新はバッファリングされる）
@@ -566,12 +570,57 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       return _scrollModeHistoryLines;
     }
 
-    final estimated = paneHeight * _normalModeHistoryScreens;
-    if (estimated < _normalModeHistoryLinesMin)
-      return _normalModeHistoryLinesMin;
-    if (estimated > _normalModeHistoryLinesMax)
-      return _normalModeHistoryLinesMax;
-    return estimated;
+    final normalLines = _clampInt(
+      paneHeight * _normalModeHistoryScreens,
+      min: _normalModeHistoryLinesMin,
+      max: _normalModeHistoryLinesMax,
+    );
+
+    // 更新が激しい（live系）ときは描画・パース負荷を優先して取得行数を削減する。
+    // ScrollbackはScrollモード（tmux copy-mode）で確保できるため、
+    // Normalモードでは「見えている周辺」だけ取れば十分。
+    final isHighFrequency =
+        _currentPollingInterval <= _highFrequencyPollingThresholdMs;
+    if (!isHighFrequency) {
+      return normalLines;
+    }
+
+    final liveLines = _clampInt(
+      paneHeight * _liveModeHistoryScreens,
+      min: _liveModeHistoryLinesMin,
+      max: _liveModeHistoryLinesMax,
+    );
+    return liveLines < normalLines ? liveLines : normalLines;
+  }
+
+  int _clampInt(int value, {required int min, required int max}) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+
+  ({String paneContent, String cursorLine, String paneMode})
+  _splitPollCombinedOutput(String combinedOutput) {
+    final lastBreak = combinedOutput.lastIndexOf('\n');
+    if (lastBreak == -1) {
+      return (paneContent: combinedOutput, cursorLine: '', paneMode: '');
+    }
+
+    final paneMode = combinedOutput.substring(lastBreak + 1);
+    final beforePaneMode = combinedOutput.substring(0, lastBreak);
+
+    final secondBreak = beforePaneMode.lastIndexOf('\n');
+    if (secondBreak == -1) {
+      return (paneContent: '', cursorLine: beforePaneMode, paneMode: paneMode);
+    }
+
+    final cursorLine = beforePaneMode.substring(secondBreak + 1);
+    final paneContent = beforePaneMode.substring(0, secondBreak);
+    return (
+      paneContent: paneContent,
+      cursorLine: cursorLine,
+      paneMode: paneMode,
+    );
   }
 
   /// ペイン内容をポーリング取得
@@ -601,7 +650,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         return;
       }
 
-      final startTime = DateTime.now();
+      final stopwatch = Stopwatch()..start();
 
       // 3つのコマンドを1つに統合して実行（持続的シェルは同時に1コマンドのみ）
       // capture-pane + カーソル位置情報 + ペインモード を1回で取得
@@ -619,18 +668,18 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         timeout: const Duration(seconds: 2),
       );
 
-      // 出力を分割（最後の行がペインモード、その前がカーソル情報）
-      final lines = combinedOutput.split('\n');
-      final paneModeOutput = lines.isNotEmpty ? lines.removeLast() : '';
-      final cursorOutput = lines.isNotEmpty ? lines.removeLast() : '';
-      final output = lines.join('\n');
+      stopwatch.stop();
+
+      // 出力を分割（末尾2行が cursor / pane_mode）
+      final parts = _splitPollCombinedOutput(combinedOutput);
+      final paneModeOutput = parts.paneMode;
+      final cursorOutput = parts.cursorLine;
+      final output = parts.paneContent;
 
       // capture-paneの出力末尾にある改行を削除
       final processedOutput = output.endsWith('\n')
           ? output.substring(0, output.length - 1)
           : output;
-
-      final endTime = DateTime.now();
 
       // アンマウント済みならスキップ
       if (!mounted || _isDisposed) return;
@@ -672,7 +721,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       }
 
       // レイテンシを更新
-      final latency = endTime.difference(startTime).inMilliseconds;
+      final latency = stopwatch.elapsedMilliseconds;
 
       // 差分があれば更新（スロットリング適用）
       final currentView = _viewNotifier.value;
