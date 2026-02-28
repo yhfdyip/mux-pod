@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 
@@ -26,11 +25,23 @@ class PersistentShell {
   static const String _endMarker = '\x01###END_$_markerId###\x01';
 
   /// printf用のマーカー文字列（シェルコマンド内で使用）
-  static const String _printfStartMarker = r'\x01###START_' '$_markerId' r'###\x01';
-  static const String _printfEndMarker = r'\x01###END_' '$_markerId' r'###\x01';
+  static const String _printfStartMarker =
+      r'\x01###START_'
+      '$_markerId'
+      r'###\x01';
+  static const String _printfEndMarker =
+      r'\x01###END_'
+      '$_markerId'
+      r'###\x01';
+
+  static final List<int> _startMarkerBytes = utf8.encode(_startMarker);
+  static final List<int> _endMarkerBytes = utf8.encode(_endMarker);
 
   /// 出力バッファ（バイト列として蓄積し、UTF-8マルチバイト境界分割を防ぐ）
   final _rawBuffer = <int>[];
+
+  int _startMarkerIndex = -1;
+  int _searchFrom = 0;
 
   /// コマンド実行中のCompleter
   Completer<String>? _pendingCommand;
@@ -76,15 +87,17 @@ class PersistentShell {
     // - export HISTFILE=... : Bash/Zsh用（スタートアップファイル後に上書き）
     // - set fish_history ... : fish用（exportはfishで構文エラーになるため別途）
     // - 2>/dev/null で未対応シェルのエラーを抑制
-    _session!.write(utf8.encode(
-      'export HISTFILE=/dev/null HISTSIZE=0 HISTFILESIZE=0 SAVEHIST=0 2>/dev/null;'
-      ' set fish_history "" 2>/dev/null; true;'
-      ' export PS1="" PS2="" 2>/dev/null; stty -echo\n',
-    ));
+    _session!.write(
+      utf8.encode(
+        'export HISTFILE=/dev/null HISTSIZE=0 HISTFILESIZE=0 SAVEHIST=0 2>/dev/null;'
+        ' set fish_history "" 2>/dev/null; true;'
+        ' export PS1="" PS2="" 2>/dev/null; stty -echo\n',
+      ),
+    );
     await Future.delayed(const Duration(milliseconds: 100));
 
     // バッファをクリア（初期化出力を破棄）
-    _rawBuffer.clear();
+    _resetParseState();
   }
 
   /// コマンドを実行して結果を取得
@@ -106,7 +119,7 @@ class PersistentShell {
     }
 
     _pendingCommand = Completer<String>();
-    _rawBuffer.clear();
+    _resetParseState();
 
     // printfでマーカーを出力（\x01バイトを含む）
     // echoではなくprintfを使用: シェルのエコーバック内ではリテラル'\x01'（4文字）が
@@ -136,59 +149,124 @@ class PersistentShell {
 
     // デバッグ: UTF-8境界分割の検出（debugビルドのみ）
     assert(() {
-      final chunkDecoded = utf8.decode(data, allowMalformed: true);
-      if (chunkDecoded.contains('\uFFFD')) {
-        final lastBytes = data.length > 6
-            ? data.sublist(data.length - 6)
-            : data;
-        debugPrint(
-          '[PersistentShell] UTF-8 boundary split detected!'
-          ' chunk_size=${data.length}'
-          ' last_bytes=${lastBytes.map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}'
-        );
-      }
+      _debugCheckUtf8BoundarySplit(data);
       return true;
     }());
 
     // バイト列として蓄積（チャンク単位デコードによるUTF-8境界分割を防止）
     _rawBuffer.addAll(data);
-
-    // 蓄積したバイト列全体を一度にデコード
-    final content = utf8.decode(_rawBuffer, allowMalformed: true);
-
-    // 開始マーカーと終了マーカーの両方が揃っているかチェック
-    final startIndex = content.indexOf(_startMarker);
-    final endIndex = content.indexOf(_endMarker);
-
-    if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
-      // 開始マーカーの次の行から終了マーカーの前までを抽出
-      final startPos = startIndex + _startMarker.length;
-      var result = content.substring(startPos, endIndex);
-
-      // PTYの出力変換で\r\nや\rが使われる場合があるため正規化
-      // 事実: macOS PTYではnewlines=0, CRs=19（\nが\rに変換されている）
-      result = result.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-
-      // 先頭と末尾の改行を削除
-      if (result.startsWith('\n')) {
-        result = result.substring(1);
-      }
-      if (result.endsWith('\n')) {
-        result = result.substring(0, result.length - 1);
-      }
-
-      // Completerを先にnullにしてから完了（再入防止）
-      _pendingCommand = null;
-      _rawBuffer.clear();
-      pending.complete(result);
+    final startAfter = _ensureStartMarker();
+    if (startAfter == null) {
+      _searchFrom = _calculateNextSearchFrom(
+        bufferLength: _rawBuffer.length,
+        needleLength: _startMarkerBytes.length,
+        minFrom: 0,
+      );
+      return;
     }
+    final endIndex = _indexOfBytes(_rawBuffer, _endMarkerBytes, _searchFrom);
+    if (endIndex == -1) {
+      _searchFrom = _calculateNextSearchFrom(
+        bufferLength: _rawBuffer.length,
+        needleLength: _endMarkerBytes.length,
+        minFrom: startAfter,
+      );
+      return;
+    }
+    final resultBytes = _rawBuffer.sublist(startAfter, endIndex);
+    final result = _normalizeCommandOutput(
+      utf8.decode(resultBytes, allowMalformed: true),
+    );
+
+    // Completerを先にnullにしてから完了（再入防止）
+    _pendingCommand = null;
+    _resetParseState();
+    pending.complete(result);
+  }
+
+  void _debugCheckUtf8BoundarySplit(Uint8List data) {
+    final chunkDecoded = utf8.decode(data, allowMalformed: true);
+    if (!chunkDecoded.contains('\uFFFD')) return;
+    final lastBytes = data.length > 6 ? data.sublist(data.length - 6) : data;
+    debugPrint(
+      '[PersistentShell] UTF-8 boundary split detected!'
+      ' chunk_size=${data.length}'
+      ' last_bytes=${lastBytes.map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
+    );
+  }
+
+  void _resetParseState() {
+    _rawBuffer.clear();
+    _startMarkerIndex = -1;
+    _searchFrom = 0;
+  }
+
+  int? _ensureStartMarker() {
+    if (_startMarkerIndex != -1) {
+      return _startMarkerIndex + _startMarkerBytes.length;
+    }
+    final startIndex = _indexOfBytes(
+      _rawBuffer,
+      _startMarkerBytes,
+      _searchFrom,
+    );
+    if (startIndex == -1) {
+      return null;
+    }
+    _startMarkerIndex = startIndex;
+    _searchFrom = _startMarkerIndex + _startMarkerBytes.length;
+    return _searchFrom;
+  }
+
+  int _calculateNextSearchFrom({
+    required int bufferLength,
+    required int needleLength,
+    required int minFrom,
+  }) {
+    final candidate = bufferLength - needleLength + 1;
+    final next = candidate < 0 ? 0 : candidate;
+    return next < minFrom ? minFrom : next;
+  }
+
+  int _indexOfBytes(List<int> haystack, List<int> needle, int start) {
+    if (needle.isEmpty) return start <= haystack.length ? start : -1;
+    if (start < 0) return -1;
+    final maxStart = haystack.length - needle.length;
+    for (var i = start; i <= maxStart; i++) {
+      var matched = true;
+      for (var j = 0; j < needle.length; j++) {
+        if (haystack[i + j] != needle[j]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) return i;
+    }
+    return -1;
+  }
+
+  String _normalizeCommandOutput(String raw) {
+    // PTYの出力変換で\r\nや\rが使われる場合があるため正規化
+    // 事実: macOS PTYではnewlines=0, CRs=19（\nが\rに変換されている）
+    var result = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+
+    // 先頭と末尾の改行を削除（マーカーのprintfで付与した改行）
+    if (result.startsWith('\n')) {
+      result = result.substring(1);
+    }
+    if (result.endsWith('\n')) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result;
   }
 
   /// セッション終了時の処理
   void _onDone() {
     _isClosed = true;
     if (_pendingCommand != null && !_pendingCommand!.isCompleted) {
-      _pendingCommand!.completeError(PersistentShellError('Shell session closed'));
+      _pendingCommand!.completeError(
+        PersistentShellError('Shell session closed'),
+      );
     }
   }
 
@@ -196,7 +274,9 @@ class PersistentShell {
   void _onError(Object error) {
     _isClosed = true;
     if (_pendingCommand != null && !_pendingCommand!.isCompleted) {
-      _pendingCommand!.completeError(PersistentShellError('Shell error: $error'));
+      _pendingCommand!.completeError(
+        PersistentShellError('Shell error: $error'),
+      );
     }
   }
 
@@ -223,7 +303,7 @@ class PersistentShell {
     _session?.close();
     _session = null;
 
-    _rawBuffer.clear();
+    _resetParseState();
   }
 }
 

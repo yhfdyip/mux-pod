@@ -60,13 +60,12 @@ class _TerminalViewData {
     int? latency,
     int? paneWidth,
     int? paneHeight,
-  }) =>
-      _TerminalViewData(
-        content: content ?? this.content,
-        latency: latency ?? this.latency,
-        paneWidth: paneWidth ?? this.paneWidth,
-        paneHeight: paneHeight ?? this.paneHeight,
-      );
+  }) => _TerminalViewData(
+    content: content ?? this.content,
+    latency: latency ?? this.latency,
+    paneWidth: paneWidth ?? this.paneWidth,
+    paneHeight: paneHeight ?? this.paneHeight,
+  );
 }
 
 /// ターミナル画面（HTMLデザイン仕様準拠）
@@ -106,7 +105,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
   // ポーリングで頻繁に更新されるターミナル表示データ（ValueNotifierで管理）
   // 親のsetState()を回避し、ValueListenableBuilderでサブツリーのみリビルドする
-  final _viewNotifier = ValueNotifier<_TerminalViewData>(const _TerminalViewData());
+  final _viewNotifier = ValueNotifier<_TerminalViewData>(
+    const _TerminalViewData(),
+  );
 
   // ポーリング用タイマー
   Timer? _pollTimer;
@@ -125,6 +126,18 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   int _currentPollingInterval = 100;
   static const int _minPollingInterval = 50;
   static const int _maxPollingInterval = 2000;
+
+  // capture-pane の取得行数（パフォーマンス最適化）
+  // - normal: 画面数枚分だけ取得して転送量/パース量を削減
+  // - scroll: 既存挙動（1000行）を維持して選択/閲覧の自由度を確保
+  static const int _normalModeHistoryScreens = 4;
+  static const int _normalModeHistoryLinesMin = 120;
+  static const int _normalModeHistoryLinesMax = 600;
+  static const int _scrollModeHistoryLines = 1000;
+
+  // 手動スクロール中は更新頻度を落として負荷を下げる
+  // （選択状態を守るため、表示内容の更新はバッファリングされる）
+  static const int _manualScrollPollingFloorMs = 350;
 
   // 選択状態保持用（スクロールモード中の更新抑制）
   String _bufferedContent = '';
@@ -148,6 +161,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
   // 入力キュー（切断中の入力を保持）
   final _inputQueue = InputQueue();
+
+  // 入力の合流（SSH exec 回数削減）
+  Timer? _inputFlushTimer;
+  final StringBuffer _pendingLiteralInput = StringBuffer();
+  final List<String> _pendingTmuxKeys = [];
+  static const Duration _inputFlushDebounce = Duration(milliseconds: 12);
 
   // バックグラウンド状態
   bool _isInBackground = false;
@@ -224,46 +243,43 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   /// Providerのリスナーを設定
   void _setupListeners() {
     // SSH状態の変化を監視
-    _sshSubscription = ref.listenManual<SshState>(
-      sshProvider,
-      (previous, next) {
-        if (!mounted || _isDisposed) return;
-        setState(() {
-          _sshState = next;
-        });
-      },
-      fireImmediately: true,
-    );
+    _sshSubscription = ref.listenManual<SshState>(sshProvider, (
+      previous,
+      next,
+    ) {
+      if (!mounted || _isDisposed) return;
+      setState(() {
+        _sshState = next;
+      });
+    }, fireImmediately: true);
 
     // Tmux状態の変化を監視
     // 注意: 親のsetState()は不要。ブレッドクラムやペインインジケーターは
     // Consumer widgetでtmuxProviderを直接watchするため、
     // サブツリー内でのみリビルドされる。
-    _tmuxSubscription = ref.listenManual<TmuxState>(
-      tmuxProvider,
-      (previous, next) {
-        // Consumer widgets が直接 tmuxProvider を watch しているため、
-        // 親の setState() は不要（BottomSheet安定化のため除去）
-      },
-      fireImmediately: true,
-    );
+    _tmuxSubscription = ref.listenManual<TmuxState>(tmuxProvider, (
+      previous,
+      next,
+    ) {
+      // Consumer widgets が直接 tmuxProvider を watch しているため、
+      // 親の setState() は不要（BottomSheet安定化のため除去）
+    }, fireImmediately: true);
 
     // 設定の変化を監視（Keep screen on / directInput用）
-    _settingsSubscription = ref.listenManual<AppSettings>(
-      settingsProvider,
-      (previous, next) {
-        if (!mounted || _isDisposed) return;
-        if (previous?.keepScreenOn != next.keepScreenOn) {
-          _applyKeepScreenOn();
-        }
-        if (previous?.directInputEnabled != next.directInputEnabled) {
-          setState(() {
-            _directInputEnabled = next.directInputEnabled;
-          });
-        }
-      },
-      fireImmediately: false,
-    );
+    _settingsSubscription = ref.listenManual<AppSettings>(settingsProvider, (
+      previous,
+      next,
+    ) {
+      if (!mounted || _isDisposed) return;
+      if (previous?.keepScreenOn != next.keepScreenOn) {
+        _applyKeepScreenOn();
+      }
+      if (previous?.directInputEnabled != next.directInputEnabled) {
+        setState(() {
+          _directInputEnabled = next.directInputEnabled;
+        });
+      }
+    }, fireImmediately: false);
 
     // 初期値を明示的に設定
     _directInputEnabled = ref.read(settingsProvider).directInputEnabled;
@@ -329,7 +345,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
     try {
       // 1. 接続情報を取得
-      final connection = ref.read(connectionsProvider.notifier).getById(widget.connectionId);
+      final connection = ref
+          .read(connectionsProvider.notifier)
+          .getById(widget.connectionId);
       if (connection == null) {
         throw Exception('Connection not found');
       }
@@ -369,10 +387,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         } else {
           // 新規セッション作成
           final sshClient = ref.read(sshProvider.notifier).client;
-          await sshClient?.exec(TmuxCommands.newSession(
-            name: widget.sessionName!,
-            detached: true,
-          ));
+          await sshClient?.exec(
+            TmuxCommands.newSession(name: widget.sessionName!, detached: true),
+          );
           if (!mounted || _isDisposed) return;
           await _refreshSessionTree();
           if (!mounted || _isDisposed) return;
@@ -385,7 +402,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         // セッションがない場合は自動生成名で新規作成
         final sshClient = ref.read(sshProvider.notifier).client;
         sessionName = 'muxpod-${DateTime.now().millisecondsSinceEpoch}';
-        await sshClient?.exec(TmuxCommands.newSession(name: sessionName, detached: true));
+        await sshClient?.exec(
+          TmuxCommands.newSession(name: sessionName, detached: true),
+        );
         if (!mounted || _isDisposed) return;
         await _refreshSessionTree();
         if (!mounted || _isDisposed) return;
@@ -420,7 +439,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       // 7. TerminalDisplayProviderにペイン情報を通知（フォントサイズ計算用）
       final activePane = ref.read(tmuxProvider).activePane;
       if (activePane != null) {
-        debugPrint('[Terminal] Pane size: ${activePane.width}x${activePane.height}');
+        debugPrint(
+          '[Terminal] Pane size: ${activePane.width}x${activePane.height}',
+        );
         ref.read(terminalDisplayProvider.notifier).updatePane(activePane);
         _viewNotifier.value = _viewNotifier.value.copyWith(
           paneWidth: activePane.width,
@@ -428,7 +449,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         );
 
         // ペインにフォーカスインを送信（Claude Code等のアプリがフォーカスを検知できるようにする）
-        await sshNotifier.client?.exec(TmuxCommands.sendKeys(activePane.id, '\x1b[I', literal: true));
+        await sshNotifier.client?.exec(
+          TmuxCommands.sendKeys(activePane.id, '\x1b[I', literal: true),
+        );
       }
 
       // 8. 100msポーリング開始
@@ -474,15 +497,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   /// 10秒ごとにセッションツリーを更新
   void _startTreeRefresh() {
     _treeRefreshTimer?.cancel();
-    _treeRefreshTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) {
-        // ポーリング中はSSH競合を回避するためスキップ
-        if (!_isPolling) {
-          _refreshSessionTree();
-        }
-      },
-    );
+    _treeRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      // ポーリング中はSSH競合を回避するためスキップ
+      if (!_isPolling) {
+        _refreshSessionTree();
+      }
+    });
   }
 
   /// 適応型ポーリングでcapture-paneを実行してターミナル内容を更新
@@ -523,12 +543,35 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       final recommended = ansiTextViewState.recommendedPollingInterval;
       // tmux copy-mode 検出中はポーリング間隔の上限を500msに制限
       // copy-mode終了の検出遅延を最大0.5秒に改善
-      final maxInterval = _scrollModeSource == ScrollModeSource.tmux ? 500 : _maxPollingInterval;
-      _currentPollingInterval = recommended.clamp(
-        _minPollingInterval,
-        maxInterval,
-      );
+      final maxInterval = _scrollModeSource == ScrollModeSource.tmux
+          ? 500
+          : _maxPollingInterval;
+      final next = recommended.clamp(_minPollingInterval, maxInterval);
+      _currentPollingInterval = _applyModeBasedPollingFloor(next);
     }
+  }
+
+  int _applyModeBasedPollingFloor(int intervalMs) {
+    if (_terminalMode == TerminalMode.scroll &&
+        _scrollModeSource == ScrollModeSource.manual) {
+      return intervalMs < _manualScrollPollingFloorMs
+          ? _manualScrollPollingFloorMs
+          : intervalMs;
+    }
+    return intervalMs;
+  }
+
+  int _calculateCaptureHistoryLines({required int paneHeight}) {
+    if (_terminalMode == TerminalMode.scroll) {
+      return _scrollModeHistoryLines;
+    }
+
+    final estimated = paneHeight * _normalModeHistoryScreens;
+    if (estimated < _normalModeHistoryLinesMin)
+      return _normalModeHistoryLinesMin;
+    if (estimated > _normalModeHistoryLinesMax)
+      return _normalModeHistoryLinesMax;
+    return estimated;
   }
 
   /// ペイン内容をポーリング取得
@@ -563,8 +606,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       // 3つのコマンドを1つに統合して実行（持続的シェルは同時に1コマンドのみ）
       // capture-pane + カーソル位置情報 + ペインモード を1回で取得
       // 出力形式: [ペイン内容]\n[カーソル情報]\n[ペインモード]
+      final captureLines = _calculateCaptureHistoryLines(
+        paneHeight: _viewNotifier.value.paneHeight,
+      );
       final combinedCommand =
-          '${TmuxCommands.capturePane(target, escapeSequences: true, startLine: -1000)}; '
+          '${TmuxCommands.capturePane(target, escapeSequences: true, startLine: -captureLines)}; '
           '${TmuxCommands.getCursorPosition(target)}; '
           '${TmuxCommands.getPaneMode(target)}';
 
@@ -599,20 +645,28 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           final h = int.tryParse(parts[3]);
 
           // ペインサイズの更新検知
-          if (w != null && h != null && (w != _viewNotifier.value.paneWidth || h != _viewNotifier.value.paneHeight)) {
-            _viewNotifier.value = _viewNotifier.value.copyWith(paneWidth: w, paneHeight: h);
+          if (w != null &&
+              h != null &&
+              (w != _viewNotifier.value.paneWidth ||
+                  h != _viewNotifier.value.paneHeight)) {
+            _viewNotifier.value = _viewNotifier.value.copyWith(
+              paneWidth: w,
+              paneHeight: h,
+            );
             // フォントサイズ再計算のために通知
             final currentActivePane = ref.read(tmuxProvider).activePane;
             if (currentActivePane != null) {
-              ref.read(terminalDisplayProvider.notifier).updatePane(
-                    currentActivePane.copyWith(width: w, height: h),
-                  );
+              ref
+                  .read(terminalDisplayProvider.notifier)
+                  .updatePane(currentActivePane.copyWith(width: w, height: h));
             }
           }
 
           final activePaneId = ref.read(tmuxProvider).activePaneId;
           if (activePaneId != null && x != null && y != null) {
-            ref.read(tmuxProvider.notifier).updateCursorPosition(activePaneId, x, y);
+            ref
+                .read(tmuxProvider.notifier)
+                .updateCursorPosition(activePaneId, x, y);
           }
         }
       }
@@ -622,10 +676,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
       // 差分があれば更新（スロットリング適用）
       final currentView = _viewNotifier.value;
-      if (processedOutput != currentView.content || latency != currentView.latency) {
+      if (processedOutput != currentView.content ||
+          latency != currentView.latency) {
         // 手動スクロールモード中のみ更新をバッファリングして選択状態を保持
         // tmux copy-mode中はcapture-paneがスクロール位置の内容を返すためリアルタイム表示
-        if (_terminalMode == TerminalMode.scroll && _scrollModeSource == ScrollModeSource.manual) {
+        if (_terminalMode == TerminalMode.scroll &&
+            _scrollModeSource == ScrollModeSource.manual) {
           _bufferedContent = processedOutput;
           _bufferedLatency = latency;
           _hasBufferedUpdate = true;
@@ -649,7 +705,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             _terminalMode = TerminalMode.scroll;
             _scrollModeSource = ScrollModeSource.tmux;
           });
-        } else if (!isTmuxCopyMode && _scrollModeSource == ScrollModeSource.tmux) {
+        } else if (!isTmuxCopyMode &&
+            _scrollModeSource == ScrollModeSource.tmux) {
           // tmux copy-mode が終了した → 自動で通常モードに復帰
           setState(() {
             _terminalMode = TerminalMode.normal;
@@ -795,6 +852,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     // タイマーを停止
     _pollTimer?.cancel();
     _pollTimer = null;
+    _inputFlushTimer?.cancel();
+    _inputFlushTimer = null;
     _treeRefreshTimer?.cancel();
     _treeRefreshTimer = null;
     // ValueNotifierを破棄
@@ -847,17 +906,26 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                           builder: (context, viewData, _) {
                             return Consumer(
                               builder: (context, ref, _) {
-                                final cursor = ref.watch(tmuxProvider.select((s) => (
-                                  x: s.activePane?.cursorX ?? 0,
-                                  y: s.activePane?.cursorY ?? 0,
-                                )));
+                                final cursor = ref.watch(
+                                  tmuxProvider.select(
+                                    (s) => (
+                                      x: s.activePane?.cursorX ?? 0,
+                                      y: s.activePane?.cursorY ?? 0,
+                                    ),
+                                  ),
+                                );
                                 return AnsiTextView(
                                   key: _ansiTextViewKey,
                                   text: viewData.content,
                                   paneWidth: viewData.paneWidth,
                                   paneHeight: viewData.paneHeight,
-                                  backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                                  foregroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.9),
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).scaffoldBackgroundColor,
+                                  foregroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withValues(alpha: 0.9),
                                   onKeyInput: _handleKeyInput,
                                   mode: _terminalMode,
                                   zoomEnabled: true,
@@ -866,12 +934,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                                       _zoomScale = scale;
                                     });
                                   },
-                                  verticalScrollController: _terminalScrollController,
+                                  verticalScrollController:
+                                      _terminalScrollController,
                                   cursorX: cursor.x,
                                   cursorY: cursor.y,
                                   onArrowSwipe: _sendSpecialKey,
                                   onTwoFingerSwipe: _handleTwoFingerSwipe,
-                                  navigableDirections: _getNavigableDirections(),
+                                  navigableDirections:
+                                      _getNavigableDirections(),
                                 );
                               },
                             );
@@ -908,9 +978,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           if (_isConnecting || sshState.isConnecting)
             Container(
               color: isDark ? Colors.black54 : Colors.white70,
-              child: const Center(
-                child: CircularProgressIndicator(),
-              ),
+              child: const Center(child: CircularProgressIndicator()),
             ),
           // エラーオーバーレイ
           if (_connectionError != null || sshState.hasError)
@@ -924,10 +992,74 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   void _handleKeyInput(KeyInputEvent event) {
     // 特殊キーの場合はtmux形式で送信
     if (event.isSpecialKey && event.tmuxKeyName != null) {
-      _sendSpecialKey(event.tmuxKeyName!);
+      _bufferTmuxKeyInput(event.tmuxKeyName!);
     } else {
       // 通常の文字はリテラル送信
-      _sendKeyData(event.data);
+      _bufferLiteralInput(event.data);
+    }
+  }
+
+  void _bufferLiteralInput(String data) {
+    if (data.isEmpty || _isDisposed) return;
+
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null || !sshClient.isConnected) {
+      _inputQueue.enqueue(data);
+      if (mounted) setState(() {}); // キューイング状態を更新
+      return;
+    }
+
+    _pendingLiteralInput.write(data);
+    _scheduleInputFlush();
+  }
+
+  void _bufferTmuxKeyInput(String tmuxKey) {
+    if (tmuxKey.isEmpty || _isDisposed) return;
+
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null || !sshClient.isConnected) return;
+
+    _pendingTmuxKeys.add(tmuxKey);
+    _scheduleInputFlush();
+  }
+
+  void _scheduleInputFlush() {
+    if (_inputFlushTimer != null) return;
+    _inputFlushTimer = Timer(_inputFlushDebounce, () {
+      unawaited(_flushBufferedInput());
+    });
+  }
+
+  Future<void> _flushBufferedInput() async {
+    _inputFlushTimer?.cancel();
+    _inputFlushTimer = null;
+
+    final literal = _pendingLiteralInput.toString();
+    _pendingLiteralInput.clear();
+
+    final keys = List<String>.from(_pendingTmuxKeys);
+    _pendingTmuxKeys.clear();
+
+    if (literal.isNotEmpty) {
+      await _sendKeyData(literal);
+    }
+    if (keys.isNotEmpty) {
+      await _sendTmuxKeys(keys);
+    }
+  }
+
+  Future<void> _sendTmuxKeys(List<String> keys) async {
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null || !sshClient.isConnected) return;
+
+    final target = ref.read(tmuxProvider.notifier).currentTarget;
+    if (target == null) return;
+
+    try {
+      await sshClient.exec(TmuxCommands.sendKeysSequence(target, keys));
+      _boostPolling();
+    } catch (_) {
+      // キー送信エラーは静かに無視（ポーリングで状態は更新される）
     }
   }
 
@@ -1066,14 +1198,18 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     try {
       // 前のペインにフォーカスアウトを送信
       if (oldPaneId != null && oldPaneId != paneId) {
-        await sshClient.exec(TmuxCommands.sendKeys(oldPaneId, '\x1b[O', literal: true));
+        await sshClient.exec(
+          TmuxCommands.sendKeys(oldPaneId, '\x1b[O', literal: true),
+        );
       }
 
       // tmux select-paneを実行
       await sshClient.exec(TmuxCommands.selectPane(paneId));
 
       // 新しいペインにフォーカスインを送信（Claude Code等のアプリがフォーカスを検知できるようにする）
-      await sshClient.exec(TmuxCommands.sendKeys(paneId, '\x1b[I', literal: true));
+      await sshClient.exec(
+        TmuxCommands.sendKeys(paneId, '\x1b[I', literal: true),
+      );
     } catch (e) {
       // SSH接続が閉じている場合は無視
       debugPrint('[Terminal] Failed to select pane: $e');
@@ -1102,7 +1238,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       final sessionName = tmuxState.activeSessionName;
       final windowIndex = tmuxState.activeWindowIndex;
       if (sessionName != null && windowIndex != null) {
-        ref.read(activeSessionsProvider.notifier).updateLastPane(
+        ref
+            .read(activeSessionsProvider.notifier)
+            .updateLastPane(
               connectionId: widget.connectionId,
               sessionName: sessionName,
               windowIndex: windowIndex,
@@ -1138,7 +1276,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           children: [
             Icon(
               isWaitingForNetwork ? Icons.signal_wifi_off : Icons.error_outline,
-              color: isWaitingForNetwork ? DesignColors.warning : colorScheme.error,
+              color: isWaitingForNetwork
+                  ? DesignColors.warning
+                  : colorScheme.error,
               size: 48,
             ),
             const SizedBox(height: 16),
@@ -1154,7 +1294,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             if (queuedCount > 0) ...[
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: DesignColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
@@ -1162,11 +1305,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.keyboard,
-                      size: 16,
-                      color: DesignColors.primary,
-                    ),
+                    Icon(Icons.keyboard, size: 16, color: DesignColors.primary),
                     const SizedBox(width: 8),
                     Text(
                       '$queuedCount chars queued',
@@ -1286,12 +1425,18 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                 decoration: BoxDecoration(
                   color: DesignColors.warning.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: DesignColors.warning.withValues(alpha: 0.5)),
+                  border: Border.all(
+                    color: DesignColors.warning.withValues(alpha: 0.5),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.unfold_more, size: 12, color: DesignColors.warning),
+                    Icon(
+                      Icons.unfold_more,
+                      size: 12,
+                      color: DesignColors.warning,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Scroll',
@@ -1324,7 +1469,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             // Latency / Reconnect indicator（ValueListenableBuilderでポーリング更新をスコープ）
             ValueListenableBuilder<_TerminalViewData>(
               valueListenable: _viewNotifier,
-              builder: (context, viewData, _) => _buildConnectionIndicator(viewData.latency),
+              builder: (context, viewData, _) =>
+                  _buildConnectionIndicator(viewData.latency),
             ),
             // Settings button
             IconButton(
@@ -1387,22 +1533,33 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                     itemCount: tmuxState.sessions.length,
                     itemBuilder: (context, index) {
                       final session = tmuxState.sessions[index];
-                      final isActive = session.name == tmuxState.activeSessionName;
+                      final isActive =
+                          session.name == tmuxState.activeSessionName;
                       return ListTile(
                         leading: Icon(
                           Icons.folder,
-                          color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
+                          color: isActive
+                              ? colorScheme.primary
+                              : colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                         title: Text(
                           session.name,
                           style: TextStyle(
-                            color: isActive ? colorScheme.primary : colorScheme.onSurface,
-                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                            color: isActive
+                                ? colorScheme.primary
+                                : colorScheme.onSurface,
+                            fontWeight: isActive
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                         subtitle: Text(
                           '${session.windowCount} windows',
-                          style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.38)),
+                          style: TextStyle(
+                            color: colorScheme.onSurface.withValues(
+                              alpha: 0.38,
+                            ),
+                          ),
                         ),
                         trailing: isActive
                             ? Icon(Icons.check, color: colorScheme.primary)
@@ -1470,22 +1627,33 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                     itemCount: session.windows.length,
                     itemBuilder: (context, index) {
                       final window = session.windows[index];
-                      final isActive = window.index == tmuxState.activeWindowIndex;
+                      final isActive =
+                          window.index == tmuxState.activeWindowIndex;
                       return ListTile(
                         leading: Icon(
                           Icons.tab,
-                          color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
+                          color: isActive
+                              ? colorScheme.primary
+                              : colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                         title: Text(
                           '${window.index}: ${window.name}',
                           style: TextStyle(
-                            color: isActive ? colorScheme.primary : colorScheme.onSurface,
-                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                            color: isActive
+                                ? colorScheme.primary
+                                : colorScheme.onSurface,
+                            fontWeight: isActive
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                         subtitle: Text(
                           '${window.paneCount} panes',
-                          style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.38)),
+                          style: TextStyle(
+                            color: colorScheme.onSurface.withValues(
+                              alpha: 0.38,
+                            ),
+                          ),
                         ),
                         trailing: isActive
                             ? Icon(Icons.check, color: colorScheme.primary)
@@ -1570,8 +1738,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                       final paneTitle = pane.title?.isNotEmpty == true
                           ? pane.title!
                           : (pane.currentCommand?.isNotEmpty == true
-                              ? pane.currentCommand!
-                              : 'Pane ${pane.index}');
+                                ? pane.currentCommand!
+                                : 'Pane ${pane.index}');
                       return ListTile(
                         leading: Container(
                           width: 32,
@@ -1584,7 +1752,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                             border: Border.all(
                               color: isActive
                                   ? colorScheme.primary.withValues(alpha: 0.5)
-                                  : colorScheme.onSurface.withValues(alpha: 0.1),
+                                  : colorScheme.onSurface.withValues(
+                                      alpha: 0.1,
+                                    ),
                             ),
                           ),
                           child: Center(
@@ -1593,7 +1763,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                               style: GoogleFonts.jetBrainsMono(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
-                                color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
+                                color: isActive
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface.withValues(
+                                        alpha: 0.6,
+                                      ),
                               ),
                             ),
                           ),
@@ -1601,13 +1775,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                         title: Text(
                           paneTitle,
                           style: TextStyle(
-                            color: isActive ? colorScheme.primary : colorScheme.onSurface,
-                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                            color: isActive
+                                ? colorScheme.primary
+                                : colorScheme.onSurface,
+                            fontWeight: isActive
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                         subtitle: Text(
                           '${pane.width}x${pane.height}',
-                          style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.38)),
+                          style: TextStyle(
+                            color: colorScheme.onSurface.withValues(
+                              alpha: 0.38,
+                            ),
+                          ),
                         ),
                         trailing: isActive
                             ? Icon(Icons.check, color: colorScheme.primary)
@@ -1645,7 +1827,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             ? BoxDecoration(
                 color: colorScheme.onSurface.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: colorScheme.onSurface.withValues(alpha: 0.05)),
+                border: Border.all(
+                  color: colorScheme.onSurface.withValues(alpha: 0.05),
+                ),
               )
             : null,
         child: Row(
@@ -1657,7 +1841,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                 size: 12,
                 color: isActive
                     ? colorScheme.primary
-                    : (isSelected ? colorScheme.onSurface : colorScheme.onSurface.withValues(alpha: 0.6)),
+                    : (isSelected
+                          ? colorScheme.onSurface
+                          : colorScheme.onSurface.withValues(alpha: 0.6)),
               ),
               const SizedBox(width: 4),
             ],
@@ -1665,10 +1851,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
               label.isEmpty ? '...' : label,
               style: GoogleFonts.jetBrainsMono(
                 fontSize: 11,
-                fontWeight: isActive || isSelected ? FontWeight.w700 : FontWeight.w400,
+                fontWeight: isActive || isSelected
+                    ? FontWeight.w700
+                    : FontWeight.w400,
                 color: isActive
                     ? colorScheme.primary
-                    : (isSelected ? colorScheme.onSurface : colorScheme.onSurface.withValues(alpha: 0.5)),
+                    : (isSelected
+                          ? colorScheme.onSurface
+                          : colorScheme.onSurface.withValues(alpha: 0.5)),
               ),
             ),
             if (onTap != null) ...[
@@ -1705,7 +1895,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   /// ターミナルメニューを表示
   void _showTerminalMenu() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final menuBgColor = isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight;
+    final menuBgColor = isDark
+        ? DesignColors.surfaceDark
+        : DesignColors.surfaceLight;
     final textColor = isDark ? Colors.white : Colors.black87;
     final mutedTextColor = isDark ? Colors.white38 : Colors.black38;
     final inactiveIconColor = isDark ? Colors.white60 : Colors.black45;
@@ -1740,7 +1932,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                   ],
                 ),
               ),
-              Divider(height: 1, color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300),
+              Divider(
+                height: 1,
+                color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300,
+              ),
               // モード切り替え（Normal / Scroll & Select）
               ListTile(
                 leading: Icon(
@@ -1778,7 +1973,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                         : TerminalMode.normal;
                     setState(() {
                       _terminalMode = newMode;
-                      _scrollModeSource = value ? ScrollModeSource.manual : ScrollModeSource.none;
+                      _scrollModeSource = value
+                          ? ScrollModeSource.manual
+                          : ScrollModeSource.none;
                     });
                     if (newMode == TerminalMode.scroll) {
                       _enterTmuxCopyMode();
@@ -1797,7 +1994,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                       : TerminalMode.scroll;
                   setState(() {
                     _terminalMode = newMode;
-                    _scrollModeSource = isScrolling ? ScrollModeSource.none : ScrollModeSource.manual;
+                    _scrollModeSource = isScrolling
+                        ? ScrollModeSource.none
+                        : ScrollModeSource.manual;
                   });
                   if (newMode == TerminalMode.scroll) {
                     _enterTmuxCopyMode();
@@ -1812,7 +2011,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
               ListTile(
                 leading: Icon(
                   Icons.zoom_out_map,
-                  color: _zoomScale != 1.0 ? DesignColors.warning : inactiveIconColor,
+                  color: _zoomScale != 1.0
+                      ? DesignColors.warning
+                      : inactiveIconColor,
                 ),
                 title: Text(
                   'Reset Zoom',
@@ -1837,17 +2038,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                       }
                     : null,
               ),
-              Divider(height: 1, color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300),
+              Divider(
+                height: 1,
+                color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300,
+              ),
               // 設定画面へ
               ListTile(
-                leading: Icon(
-                  Icons.settings,
-                  color: inactiveIconColor,
-                ),
-                title: Text(
-                  'Settings',
-                  style: TextStyle(color: textColor),
-                ),
+                leading: Icon(Icons.settings, color: inactiveIconColor),
+                title: Text('Settings', style: TextStyle(color: textColor)),
                 subtitle: Text(
                   'Font, theme, and other options',
                   style: TextStyle(color: mutedTextColor, fontSize: 12),
@@ -1862,7 +2060,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                   );
                 },
               ),
-              Divider(height: 1, color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300),
+              Divider(
+                height: 1,
+                color: isDark ? const Color(0xFF2A2B36) : Colors.grey.shade300,
+              ),
               // 切断ボタン
               ListTile(
                 leading: Icon(
@@ -1900,7 +2101,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       context: context,
       builder: (context) {
         return AlertDialog(
-          backgroundColor: isDark ? DesignColors.surfaceDark : DesignColors.surfaceLight,
+          backgroundColor: isDark
+              ? DesignColors.surfaceDark
+              : DesignColors.surfaceLight,
           title: Text(
             'Disconnect?',
             style: TextStyle(color: isDark ? Colors.white : Colors.black87),
@@ -1914,7 +2117,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
               onPressed: () => Navigator.pop(context),
               child: Text(
                 'Cancel',
-                style: TextStyle(color: isDark ? Colors.white60 : Colors.black54),
+                style: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
               ),
             ),
             ElevatedButton(
@@ -1955,9 +2160,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(color: colorScheme.outline, width: 1),
-        ),
+        border: Border(left: BorderSide(color: colorScheme.outline, width: 1)),
       ),
       child: _sshState.isReconnecting
           ? _buildReconnectingIndicator()
@@ -2110,6 +2313,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   /// [key] 送信するキー
   /// [literal] trueの場合はリテラル送信（-l フラグ）
   Future<void> _sendKey(String key, {bool literal = true}) async {
+    await _flushBufferedInput();
     final sshClient = ref.read(sshProvider.notifier).client;
 
     // 接続が切れている場合はキューに追加（リテラルの場合のみ）
@@ -2125,7 +2329,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     if (target == null) return;
 
     try {
-      await sshClient.exec(TmuxCommands.sendKeys(target, key, literal: literal));
+      await sshClient.exec(
+        TmuxCommands.sendKeys(target, key, literal: literal),
+      );
       _boostPolling();
     } catch (_) {
       // キー送信エラーは静かに無視（ポーリングで状態は更新される）
@@ -2158,6 +2364,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
   /// tmux特殊キーを送信（Ctrl+C, Escape等）
   Future<void> _sendSpecialKey(String tmuxKey) async {
+    await _flushBufferedInput();
     final sshClient = ref.read(sshProvider.notifier).client;
 
     // 特殊キーは接続が切れている場合は送信しない（キューしない）
@@ -2168,7 +2375,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
     try {
       // 特殊キーはリテラルではなくtmux形式で送信
-      await sshClient.exec(TmuxCommands.sendKeys(target, tmuxKey, literal: false));
+      await sshClient.exec(
+        TmuxCommands.sendKeys(target, tmuxKey, literal: false),
+      );
       _boostPolling();
     } catch (_) {
       // キー送信エラーは静かに無視（ポーリングで状態は更新される）
@@ -2320,7 +2529,9 @@ class _PaneLayoutPainter extends CustomPainter {
 
       // 枠線
       final borderPaint = Paint()
-        ..color = isActive ? activeColor : (isDark ? Colors.white30 : Colors.grey.shade500)
+        ..color = isActive
+            ? activeColor
+            : (isDark ? Colors.white30 : Colors.grey.shade500)
         ..style = PaintingStyle.stroke
         ..strokeWidth = isActive ? 1.5 : 1.0;
       canvas.drawRect(rect, borderPaint);
@@ -2578,14 +2789,18 @@ class _InputDialogContentState extends State<_InputDialogContent> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark ? DesignColors.keyBackground : DesignColors.keyBackgroundLight,
+                  color: isDark
+                      ? DesignColors.keyBackground
+                      : DesignColors.keyBackgroundLight,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   'Shift+Enter: 改行',
                   style: GoogleFonts.jetBrainsMono(
                     fontSize: 10,
-                    color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
+                    color: isDark
+                        ? DesignColors.textMuted
+                        : DesignColors.textMutedLight,
                   ),
                 ),
               ),
@@ -2608,10 +2823,14 @@ class _InputDialogContentState extends State<_InputDialogContent> {
               decoration: InputDecoration(
                 hintText: 'Type your command... (Enter to send)',
                 hintStyle: GoogleFonts.jetBrainsMono(
-                  color: isDark ? DesignColors.textMuted : DesignColors.textMutedLight,
+                  color: isDark
+                      ? DesignColors.textMuted
+                      : DesignColors.textMutedLight,
                 ),
                 filled: true,
-                fillColor: isDark ? DesignColors.inputDark : DesignColors.inputLight,
+                fillColor: isDark
+                    ? DesignColors.inputDark
+                    : DesignColors.inputLight,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -2632,7 +2851,9 @@ class _InputDialogContentState extends State<_InputDialogContent> {
                   onPressed: () => Navigator.pop(context),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: colorScheme.onSurface,
-                    side: BorderSide(color: colorScheme.onSurface.withValues(alpha: 0.3)),
+                    side: BorderSide(
+                      color: colorScheme.onSurface.withValues(alpha: 0.3),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),

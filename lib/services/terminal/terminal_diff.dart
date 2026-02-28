@@ -3,6 +3,9 @@
 /// 高頻度更新時のパフォーマンス最適化のため、
 /// 行単位で差分を検出し、変更された部分だけを特定する。
 class TerminalDiff {
+  /// 前回のコンテンツ（生文字列、完全一致なら差分計算をスキップ）
+  String? _previousContent;
+
   /// 前回のコンテンツ（行単位）
   List<String> _previousLines = [];
 
@@ -14,12 +17,24 @@ class TerminalDiff {
 
   /// 差分計算結果
   DiffResult calculateDiff(String newContent) {
+    // カーソル移動等でWidgetがリビルドされても、内容が同一なら高コスト処理を避ける
+    if (_previousContent != null && _previousContent == newContent) {
+      _unchangedFrames++;
+      return DiffResult(
+        hasChanges: false,
+        isFullUpdate: false,
+        changedLineIndices: const [],
+        unchangedFrames: _unchangedFrames,
+      );
+    }
+
     final newLines = newContent.split('\n');
     final newHashes = newLines.map((line) => line.hashCode).toList();
 
     // 初回または行数が大きく異なる場合は全更新
     if (_previousLines.isEmpty ||
         (newLines.length - _previousLines.length).abs() > 10) {
+      _previousContent = newContent;
       _previousLines = newLines;
       _previousHashes = newHashes;
       _unchangedFrames = 0;
@@ -33,8 +48,9 @@ class TerminalDiff {
 
     // 行単位で差分を検出
     final changedIndices = <int>[];
-    final maxLen =
-        newLines.length > _previousLines.length ? newLines.length : _previousLines.length;
+    final maxLen = newLines.length > _previousLines.length
+        ? newLines.length
+        : _previousLines.length;
 
     for (int i = 0; i < maxLen; i++) {
       if (i >= _previousLines.length) {
@@ -57,6 +73,7 @@ class TerminalDiff {
     }
 
     // 前回の状態を更新
+    _previousContent = newContent;
     _previousLines = newLines;
     _previousHashes = newHashes;
 
@@ -70,6 +87,7 @@ class TerminalDiff {
 
   /// 差分をリセット
   void reset() {
+    _previousContent = null;
     _previousLines = [];
     _previousHashes = [];
     _unchangedFrames = 0;
@@ -146,7 +164,8 @@ class AdaptivePollingInterval {
     }
 
     // 中間状態：線形補間
-    final ratio = (unchangedFrames - highFrequencyThreshold) /
+    final ratio =
+        (unchangedFrames - highFrequencyThreshold) /
         (lowFrequencyThreshold - highFrequencyThreshold);
     return (minInterval + (maxInterval - minInterval) * ratio).round();
   }

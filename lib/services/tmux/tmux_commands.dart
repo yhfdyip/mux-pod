@@ -44,7 +44,8 @@ class TmuxCommands {
     if (detached) parts.add('-d');
     parts.addAll(['-s', _escapeArg(name)]);
     if (windowName != null) parts.addAll(['-n', _escapeArg(windowName)]);
-    if (startDirectory != null) parts.addAll(['-c', _escapeArg(startDirectory)]);
+    if (startDirectory != null)
+      parts.addAll(['-c', _escapeArg(startDirectory)]);
     return parts.join(' ');
   }
 
@@ -92,7 +93,8 @@ class TmuxCommands {
     final parts = ['tmux', 'new-window', '-t', _escapeArg(sessionName)];
     if (background) parts.add('-d');
     if (windowName != null) parts.addAll(['-n', _escapeArg(windowName)]);
-    if (startDirectory != null) parts.addAll(['-c', _escapeArg(startDirectory)]);
+    if (startDirectory != null)
+      parts.addAll(['-c', _escapeArg(startDirectory)]);
     return parts.join(' ');
   }
 
@@ -107,7 +109,11 @@ class TmuxCommands {
   }
 
   /// ウィンドウ名を変更
-  static String renameWindow(String sessionName, int windowIndex, String newName) {
+  static String renameWindow(
+    String sessionName,
+    int windowIndex,
+    String newName,
+  ) {
     return 'tmux rename-window -t ${_escapeArg(sessionName)}:$windowIndex ${_escapeArg(newName)}';
   }
 
@@ -177,7 +183,8 @@ class TmuxCommands {
   }) {
     final parts = ['tmux', 'split-window', '-h', '-t', _escapeArg(target)];
     if (percentage != null) parts.addAll(['-p', percentage.toString()]);
-    if (startDirectory != null) parts.addAll(['-c', _escapeArg(startDirectory)]);
+    if (startDirectory != null)
+      parts.addAll(['-c', _escapeArg(startDirectory)]);
     return parts.join(' ');
   }
 
@@ -189,7 +196,8 @@ class TmuxCommands {
   }) {
     final parts = ['tmux', 'split-window', '-v', '-t', _escapeArg(target)];
     if (percentage != null) parts.addAll(['-p', percentage.toString()]);
-    if (startDirectory != null) parts.addAll(['-c', _escapeArg(startDirectory)]);
+    if (startDirectory != null)
+      parts.addAll(['-c', _escapeArg(startDirectory)]);
     return parts.join(' ');
   }
 
@@ -212,6 +220,24 @@ class TmuxCommands {
       return 'tmux send-keys -t ${_escapeArg(paneId)} -l $escapedKeys';
     }
     return 'tmux send-keys -t ${_escapeArg(paneId)} $escapedKeys';
+  }
+
+  /// 複数のキー名をまとめて送信（tmux形式）
+  ///
+  /// 例: `['Up', 'Up', 'Enter']`
+  /// - literal送信（-l）とは併用できないため、必要なら呼び出し側で分ける。
+  static String sendKeysSequence(String paneId, List<String> keys) {
+    if (keys.isEmpty) {
+      throw ArgumentError('keys must not be empty');
+    }
+    final parts = [
+      'tmux',
+      'send-keys',
+      '-t',
+      _escapeArg(paneId),
+      ...keys.map(_escapeArg),
+    ];
+    return parts.join(' ');
   }
 
   /// Enterキーを送信
@@ -325,7 +351,13 @@ class TmuxCommands {
   static String _escapeArg(String arg) {
     // シェルの特殊文字をエスケープ
     // 特殊文字: スペース、クォート、バックスラッシュ、変数展開、バッククォート、その他
-    if (arg.contains(RegExp(r'[\s"' "'" r'\\$`!{}\[\]<>|&;()]'))) {
+    if (arg.contains(
+      RegExp(
+        r'[\s"'
+        "'"
+        r'\\$`!{}\[\]<>|&;()]',
+      ),
+    )) {
       // ダブルクォートでラップし、内部の特殊文字をエスケープ
       final escaped = arg
           .replaceAll(r'\', r'\\')
