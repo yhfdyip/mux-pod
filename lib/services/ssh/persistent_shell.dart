@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart';
 
 /// 持続的シェルセッション
 ///
@@ -12,14 +12,25 @@ class PersistentShell {
   final SSHClient _sshClient;
   SSHSession? _session;
 
-  /// コマンド開始検知用マーカー
-  static const String _startMarker = '###START_7f3d8a2b###';
+  /// マーカーのコアテキスト
+  static const String _markerId = '7f3d8a2b';
+
+  /// コマンド開始検知用マーカー（\x01プレフィックス/サフィックス付き）
+  ///
+  /// \x01（SOH制御文字）を含めることで、シェルのエコーバックテキスト内の
+  /// リテラル文字列（`\x01`=4文字）と区別する。
+  /// printfの実出力のみがバイト0x01を含むため、エコーバック内では一致しない。
+  static const String _startMarker = '\x01###START_$_markerId###\x01';
 
   /// コマンド終了検知用マーカー
-  static const String _endMarker = '###END_7f3d8a2b###';
+  static const String _endMarker = '\x01###END_$_markerId###\x01';
 
-  /// 出力バッファ
-  final _outputBuffer = StringBuffer();
+  /// printf用のマーカー文字列（シェルコマンド内で使用）
+  static const String _printfStartMarker = r'\x01###START_' '$_markerId' r'###\x01';
+  static const String _printfEndMarker = r'\x01###END_' '$_markerId' r'###\x01';
+
+  /// 出力バッファ（バイト列として蓄積し、UTF-8マルチバイト境界分割を防ぐ）
+  final _rawBuffer = <int>[];
 
   /// コマンド実行中のCompleter
   Completer<String>? _pendingCommand;
@@ -61,12 +72,19 @@ class PersistentShell {
     // シェル初期化を待つ（プロンプトが出力されるまで少し待機）
     await Future.delayed(const Duration(milliseconds: 100));
 
-    // プロンプトを抑制し、エコーを無効化
-    _session!.write(utf8.encode('export PS1="" PS2=""; stty -echo\n'));
+    // ヒストリー記録を無効化（Bash/Zsh/fish対応）し、プロンプトを抑制
+    // - export HISTFILE=... : Bash/Zsh用（スタートアップファイル後に上書き）
+    // - set fish_history ... : fish用（exportはfishで構文エラーになるため別途）
+    // - 2>/dev/null で未対応シェルのエラーを抑制
+    _session!.write(utf8.encode(
+      'export HISTFILE=/dev/null HISTSIZE=0 HISTFILESIZE=0 SAVEHIST=0 2>/dev/null;'
+      ' set fish_history "" 2>/dev/null; true;'
+      ' export PS1="" PS2="" 2>/dev/null; stty -echo\n',
+    ));
     await Future.delayed(const Duration(milliseconds: 100));
 
     // バッファをクリア（初期化出力を破棄）
-    _outputBuffer.clear();
+    _rawBuffer.clear();
   }
 
   /// コマンドを実行して結果を取得
@@ -88,11 +106,14 @@ class PersistentShell {
     }
 
     _pendingCommand = Completer<String>();
-    _outputBuffer.clear();
+    _rawBuffer.clear();
 
-    // 開始マーカー + コマンド + 終了マーカーを送信
-    // これにより、エコーバックやプロンプトに関係なく正確に出力を抽出できる
-    final commandWithMarkers = 'echo "$_startMarker"; $command; echo "$_endMarker"\n';
+    // printfでマーカーを出力（\x01バイトを含む）
+    // echoではなくprintfを使用: シェルのエコーバック内ではリテラル'\x01'（4文字）が
+    // 表示されるが、printfの実出力はバイト0x01を含む。
+    // これによりエコーバック内のマーカーと実出力のマーカーを確実に区別できる。
+    final commandWithMarkers =
+        "printf '$_printfStartMarker\\n'; $command; printf '$_printfEndMarker\\n'\n";
     _session!.write(utf8.encode(commandWithMarkers));
 
     // タイムアウト付きで結果を待機
@@ -113,10 +134,27 @@ class PersistentShell {
       return;
     }
 
-    final text = utf8.decode(data, allowMalformed: true);
-    _outputBuffer.write(text);
+    // デバッグ: UTF-8境界分割の検出（debugビルドのみ）
+    assert(() {
+      final chunkDecoded = utf8.decode(data, allowMalformed: true);
+      if (chunkDecoded.contains('\uFFFD')) {
+        final lastBytes = data.length > 6
+            ? data.sublist(data.length - 6)
+            : data;
+        debugPrint(
+          '[PersistentShell] UTF-8 boundary split detected!'
+          ' chunk_size=${data.length}'
+          ' last_bytes=${lastBytes.map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}'
+        );
+      }
+      return true;
+    }());
 
-    final content = _outputBuffer.toString();
+    // バイト列として蓄積（チャンク単位デコードによるUTF-8境界分割を防止）
+    _rawBuffer.addAll(data);
+
+    // 蓄積したバイト列全体を一度にデコード
+    final content = utf8.decode(_rawBuffer, allowMalformed: true);
 
     // 開始マーカーと終了マーカーの両方が揃っているかチェック
     final startIndex = content.indexOf(_startMarker);
@@ -126,6 +164,10 @@ class PersistentShell {
       // 開始マーカーの次の行から終了マーカーの前までを抽出
       final startPos = startIndex + _startMarker.length;
       var result = content.substring(startPos, endIndex);
+
+      // PTYの出力変換で\r\nや\rが使われる場合があるため正規化
+      // 事実: macOS PTYではnewlines=0, CRs=19（\nが\rに変換されている）
+      result = result.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
       // 先頭と末尾の改行を削除
       if (result.startsWith('\n')) {
@@ -137,7 +179,7 @@ class PersistentShell {
 
       // Completerを先にnullにしてから完了（再入防止）
       _pendingCommand = null;
-      _outputBuffer.clear();
+      _rawBuffer.clear();
       pending.complete(result);
     }
   }
@@ -181,7 +223,7 @@ class PersistentShell {
     _session?.close();
     _session = null;
 
-    _outputBuffer.clear();
+    _rawBuffer.clear();
   }
 }
 
