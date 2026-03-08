@@ -122,6 +122,41 @@ Toggle **Scroll & Select Mode** to enable text selection. Terminal updates are b
 - **Latency indicator** — Real-time ping display (green < 100ms, red > 500ms)
 - **Adaptive polling** — 50ms–500ms based on activity for battery optimization
 
+### Deep Linking
+
+Open MuxPod directly to a specific server, session, window, or pane from external apps using the `muxpod://` URL scheme.
+
+**URL format:**
+
+```
+muxpod://connect?server=<id>&session=<name>&window=<name>&pane=<index>
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `server` | Yes | Matches the connection's **Deep Link ID** first, then falls back to **connection name** (case-insensitive) |
+| `session` | No | tmux session name to attach to. If omitted, uses the first available session |
+| `window` | No | tmux window name to switch to |
+| `pane` | No | Pane index within the window (0-based) |
+
+**Setup:**
+
+1. Open a connection in **Servers** > **Edit**
+2. Set a **Deep Link ID** (e.g., `macbook-pro`) — this is a stable identifier you use in URLs
+3. Use the same ID in your external scripts/notifications
+
+**Example — Claude Code finish notification with deep link:**
+
+```
+muxpod://connect?server=macbook-pro&session=dev&window=claude&pane=0
+```
+
+This will: find the server by ID `macbook-pro` → SSH connect → attach to session `dev` → switch to window `claude` → focus pane `0`.
+
+Works on both **Android** (intent filter) and **iOS** (URL type). Supports cold start (app not running) and hot links (app in background).
+
+**Use with [claude-telegram-notify](https://github.com/launch52-ai/claude-telegram-notify)** to get Telegram notifications when Claude Code finishes or needs input, with tappable deep links that open MuxPod directly to the right terminal.
+
 ---
 
 ## Quick Start
