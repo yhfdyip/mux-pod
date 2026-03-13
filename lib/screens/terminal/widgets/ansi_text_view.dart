@@ -90,6 +90,9 @@ class AnsiTextView extends ConsumerStatefulWidget {
   /// 各方向にペインが存在するかのマップ（視覚フィードバック用）
   final Map<SwipeDirection, bool>? navigableDirections;
 
+  /// ターミナル領域タップ時のコールバック
+  final VoidCallback? onTap;
+
   const AnsiTextView({
     super.key,
     required this.text,
@@ -107,6 +110,7 @@ class AnsiTextView extends ConsumerStatefulWidget {
     this.onArrowSwipe,
     this.onTwoFingerSwipe,
     this.navigableDirections,
+    this.onTap,
   });
 
   @override
@@ -951,7 +955,10 @@ class AnsiTextViewState extends ConsumerState<AnsiTextView>
           autofocus: true,
           onKeyEvent: _handleKeyEvent,
           child: GestureDetector(
-            onTap: () => _focusNode.requestFocus(),
+            onTap: () {
+              _focusNode.requestFocus();
+              widget.onTap?.call();
+            },
             onLongPressStart: _onLongPressStart,
             onLongPressMoveUpdate: _onLongPressMoveUpdate,
             onLongPressEnd: _onLongPressEnd,

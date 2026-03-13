@@ -20,6 +20,7 @@ import '../../services/tmux/pane_navigator.dart';
 import '../../services/tmux/tmux_commands.dart';
 import '../../services/tmux/tmux_parser.dart';
 import '../../theme/design_colors.dart';
+import '../../widgets/scroll_to_bottom_button.dart';
 import '../../widgets/special_keys_bar.dart';
 import '../../providers/terminal_display_provider.dart';
 import '../settings/settings_screen.dart';
@@ -97,6 +98,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   final _secureStorage = SecureStorageService();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _ansiTextViewKey = GlobalKey<AnsiTextViewState>();
+  final _scrollToBottomKey = GlobalKey<ScrollToBottomButtonState>();
   final _terminalScrollController = ScrollController();
 
   // 接続状態（ローカルで管理）
@@ -165,6 +167,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // スクロール時にスクロールボタンを表示
+    _terminalScrollController.addListener(_onTerminalScroll);
 
     // 次フレームでリスナーを設定（ref使用のため）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -774,6 +779,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     );
   }
 
+  /// スクロール時にスクロールボタンを表示
+  void _onTerminalScroll() {
+    _scrollToBottomKey.currentState?.show();
+  }
+
   @override
   void dispose() {
     // まず_isDisposedをセットして非同期処理を停止
@@ -799,7 +809,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     _treeRefreshTimer = null;
     // ValueNotifierを破棄
     _viewNotifier.dispose();
-    // スクロールコントローラーを破棄
+    // スクロールコントローラーのリスナーを削除して破棄
+    _terminalScrollController.removeListener(_onTerminalScroll);
     _terminalScrollController.dispose();
     super.dispose();
   }
@@ -859,6 +870,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                                   backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                                   foregroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.9),
                                   onKeyInput: _handleKeyInput,
+                                  onTap: () {
+                                    _scrollToBottomKey.currentState?.show();
+                                  },
                                   mode: _terminalMode,
                                   zoomEnabled: true,
                                   onZoomChanged: (scale) {
@@ -886,6 +900,17 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                           builder: (context, ref, _) {
                             final tmuxState = ref.watch(tmuxProvider);
                             return _buildPaneIndicator(tmuxState);
+                          },
+                        ),
+                      ),
+                      // スクロールボタン: ターミナルエリア右下
+                      Positioned(
+                        bottom: 8,
+                        right: 16,
+                        child: ScrollToBottomButton(
+                          key: _scrollToBottomKey,
+                          onPressed: () {
+                            _ansiTextViewKey.currentState?.scrollToBottom();
                           },
                         ),
                       ),
@@ -1421,7 +1446,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           ),
         );
       },
-    );
+    ).then((_) {
+      _scrollToBottomKey.currentState?.show();
+    });
   }
 
   /// ウィンドウ選択ダイアログを表示
@@ -1504,7 +1531,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           ),
         );
       },
-    );
+    ).then((_) {
+      _scrollToBottomKey.currentState?.show();
+    });
   }
 
   /// ペイン選択ダイアログを表示
@@ -1626,7 +1655,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           ),
         );
       },
-    );
+    ).then((_) {
+      _scrollToBottomKey.currentState?.show();
+    });
   }
 
   Widget _buildBreadcrumbItem(
@@ -1890,7 +1921,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           ),
         );
       },
-    );
+    ).then((_) {
+      _scrollToBottomKey.currentState?.show();
+    });
   }
 
   /// 切断確認ダイアログを表示
@@ -2195,7 +2228,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           if (sheetContext.mounted) Navigator.pop(sheetContext);
         },
       ),
-    );
+    ).then((_) {
+      _scrollToBottomKey.currentState?.show();
+    });
   }
 
   /// 複数行テキストを送信（行ごとにテキスト+Enterを送信）
