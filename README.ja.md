@@ -122,6 +122,41 @@ SSH接続を管理。**タップして展開**するとアクティブなtmuxセ
 - **レイテンシインジケーター** — リアルタイムping表示（緑 < 100ms、赤 > 500ms）
 - **適応型ポーリング** — アクティビティに応じて50ms〜500msで動的調整、バッテリー最適化
 
+### ディープリンク
+
+`muxpod://` URLスキームで、外部アプリからMuxPodの特定サーバー・セッション・ウィンドウ・ペインを直接開けます。
+
+**URL形式：**
+
+```
+muxpod://connect?server=<id>&session=<name>&window=<name>&pane=<index>
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `server` | はい | 接続の**ディープリンクID**に一致 → 次に**接続名**にフォールバック（大文字小文字無視） |
+| `session` | いいえ | アタッチするtmuxセッション名。省略時は最初のセッションを使用 |
+| `window` | いいえ | 切り替えるtmuxウィンドウ名 |
+| `pane` | いいえ | ウィンドウ内のペインインデックス（0始まり） |
+
+**設定方法：**
+
+1. **Servers** > 接続を編集
+2. **Deep Link ID** を設定（例: `macbook-pro`）— URLで使用する安定した識別子
+3. 外部スクリプト/通知で同じIDを使用
+
+**例 — Claude Code完了通知のディープリンク：**
+
+```
+muxpod://connect?server=macbook-pro&session=dev&window=claude&pane=0
+```
+
+動作: ID `macbook-pro` でサーバーを検索 → SSH接続 → セッション `dev` にアタッチ → ウィンドウ `claude` に切替 → ペイン `0` にフォーカス
+
+**Android**（インテントフィルター）と**iOS**（URLタイプ）の両方で動作。コールドスタート（アプリ未起動）とホットリンク（バックグラウンド）に対応。
+
+**[claude-telegram-notify](https://github.com/launch52-ai/claude-telegram-notify)と連携** — Claude Codeの完了や入力待ちをTelegram通知で受け取り、タップ可能なディープリンクでMuxPodの該当ターミナルを直接開けます。
+
 ---
 
 ## クイックスタート
