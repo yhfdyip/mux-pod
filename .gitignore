@@ -60,3 +60,7 @@ worktree/
 android/key.properties
 android/app/upload-keystore.jks
 .ace-tool/
+
+# libmoshios prebuilt binary (downloaded in CI, not committed to git)
+ios/Frameworks/libmoshios.framework/libmoshios
+ios/Frameworks/libmoshios.framework/Headers/

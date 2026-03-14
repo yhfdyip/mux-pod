@@ -41,6 +41,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
   bool _isSaving = false;
   bool _isTesting = false;
   bool _obscurePassword = true;
+  bool _useMosh = false;
 
   @override
   void initState() {
@@ -61,6 +62,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
       _selectedKeyId = connection.keyId;
       _tmuxPathController.text = connection.tmuxPath ?? '';
       _deepLinkIdController.text = connection.deepLinkId ?? '';
+      _useMosh = connection.useMosh;
     }
   }
 
@@ -255,8 +257,50 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
               ),
               const SizedBox(height: 8),
               _buildDeepLinkIdInput(),
+              const SizedBox(height: 16),
+              // Mosh
+              _buildMoshToggle(),
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMoshToggle() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? DesignColors.textMuted : DesignColors.textMutedLight;
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'USE MOSH',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1,
+                  color: mutedColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'UDP-based connection (iOS only)',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 10,
+                  color: mutedColor.withValues(alpha: 0.7),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Switch(
+          value: _useMosh,
+          onChanged: (v) => setState(() => _useMosh = v),
+          activeThumbColor: colorScheme.primary,
         ),
       ],
     );
@@ -934,6 +978,7 @@ class _ConnectionFormScreenState extends ConsumerState<ConnectionFormScreen> {
         keyId: _authMethod == 'key' ? _selectedKeyId : null,
         tmuxPath: saveTmuxPath.isNotEmpty ? saveTmuxPath : null,
         deepLinkId: saveDeepLinkId.isNotEmpty ? saveDeepLinkId : null,
+        useMosh: _useMosh,
         createdAt: widget.isEditing
             ? ref.read(connectionsProvider.notifier).getById(connectionId)?.createdAt ?? DateTime.now()
             : DateTime.now(),

@@ -14,6 +14,7 @@ import '../../providers/ssh_provider.dart';
 import '../../providers/tmux_provider.dart';
 import '../../services/keychain/secure_storage.dart';
 import '../../services/network/network_monitor.dart';
+import '../../services/mosh/mosh_service.dart';
 import '../../services/ssh/input_queue.dart';
 import '../../services/ssh/ssh_client.dart' show SshConnectOptions;
 import '../../services/tmux/pane_navigator.dart';
@@ -112,6 +113,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   bool _isConnecting = false;
   String? _connectionError;
   SshState _sshState = const SshState();
+
+  // Mosh（iOS only）
+  MoshService? _moshService;
 
   // ポーリングで頻繁に更新されるターミナル表示データ（ValueNotifierで管理）
   // 親のsetState()を回避し、ValueListenableBuilderでサブツリーのみリビルドする
@@ -382,6 +386,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         return;
       }
 
+      // 3.5 Mosh起動（iOS + useMosh=true の場合）
+      if (connection.useMosh && MoshService.isSupported) {
+        await _startMosh(connection);
+        if (!mounted || _isDisposed) return;
+      }
+
       // 4. セッションツリー全体を取得
       await _refreshSessionTree();
       if (!mounted || _isDisposed) {
@@ -513,6 +523,27 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         _connectionError = e.toString();
       });
       _showErrorSnackBar(e.toString());
+    }
+  }
+
+  /// Moshセッションを起動する（iOS only）
+  Future<void> _startMosh(Connection connection) async {
+    final sshClient = ref.read(sshProvider.notifier).client;
+    if (sshClient == null) return;
+    try {
+      final params = await MoshService.bootstrapViaSsh(sshClient: sshClient);
+      _moshService = MoshService();
+      await _moshService!.connect(
+        ip: connection.host,
+        port: params.port,
+        key: params.key,
+        rows: 50,
+        cols: 200,
+      );
+    } catch (e) {
+      // Mosh起動失敗はSSH接続に影響しない（フォールバック）
+      _moshService = null;
+      debugPrint('_startMosh: failed: $e');
     }
   }
 
@@ -963,6 +994,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     _treeRefreshTimer = null;
     // ValueNotifierを破棄
     _viewNotifier.dispose();
+    // Moshを切断
+    _moshService?.disconnect();
+    _moshService = null;
     // スクロールコントローラーのリスナーを削除して破棄
     _terminalScrollController.removeListener(_onTerminalScroll);
     _terminalScrollController.dispose();

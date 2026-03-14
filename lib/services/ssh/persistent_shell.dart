@@ -73,28 +73,42 @@ class PersistentShell {
 
     _isClosed = false;
 
-    // stdout監視を開始
+    // 初期化コマンドを送信し、末尾にマーカーを出力させて完了を検知
+    // 固定 sleep を排除し、実際の応答を待つ
+    final initDone = Completer<void>();
+    const initMarker = '###INIT_DONE_7f3d8a2b###';
+
+    late StreamSubscription<Uint8List> initSub;
+    final initBuf = StringBuffer();
+    initSub = _session!.stdout.listen((data) {
+      initBuf.write(utf8.decode(data, allowMalformed: true));
+      if (initBuf.toString().contains(initMarker) && !initDone.isCompleted) {
+        initDone.complete();
+        initSub.cancel();
+      }
+    });
+
+    _session!.write(
+      utf8.encode(
+        'export HISTFILE=/dev/null HISTSIZE=0 HISTFILESIZE=0 SAVEHIST=0 2>/dev/null;'
+        ' set fish_history "" 2>/dev/null; true;'
+        ' export PS1="" PS2="" 2>/dev/null; stty -echo;'
+        ' echo $initMarker\n',
+      ),
+    );
+
+    // タイムアウト付きで待機（最大500ms）
+    await initDone.future.timeout(
+      const Duration(milliseconds: 500),
+      onTimeout: () {},
+    );
+
+    // stdoutの監視を本来のハンドラに切り替え
     _stdoutSubscription = _session!.stdout.listen(
       _onData,
       onDone: _onDone,
       onError: _onError,
     );
-
-    // シェル初期化を待つ（プロンプトが出力されるまで少し待機）
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // ヒストリー記録を無効化（Bash/Zsh/fish対応）し、プロンプトを抑制
-    // - export HISTFILE=... : Bash/Zsh用（スタートアップファイル後に上書き）
-    // - set fish_history ... : fish用（exportはfishで構文エラーになるため別途）
-    // - 2>/dev/null で未対応シェルのエラーを抑制
-    _session!.write(
-      utf8.encode(
-        'export HISTFILE=/dev/null HISTSIZE=0 HISTFILESIZE=0 SAVEHIST=0 2>/dev/null;'
-        ' set fish_history "" 2>/dev/null; true;'
-        ' export PS1="" PS2="" 2>/dev/null; stty -echo\n',
-      ),
-    );
-    await Future.delayed(const Duration(milliseconds: 100));
 
     // バッファをクリア（初期化出力を破棄）
     _resetParseState();

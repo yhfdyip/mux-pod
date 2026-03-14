@@ -1,10 +1,12 @@
 import Flutter
 import UIKit
+import libmoshios
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var deepLinkChannel: FlutterMethodChannel?
   private var initialLink: String?
+  private let moshPlugin = MoshPlugin()
 
   override func application(
     _ application: UIApplication,
@@ -13,6 +15,10 @@ import UIKit
     GeneratedPluginRegistrant.register(with: self)
 
     let controller = window?.rootViewController as! FlutterViewController
+
+    // Mosh plugin
+    moshPlugin.register(with: controller.binaryMessenger)
+
     deepLinkChannel = FlutterMethodChannel(
       name: "com.muxpod.app/deeplink",
       binaryMessenger: controller.binaryMessenger

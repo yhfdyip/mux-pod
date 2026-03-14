@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:dartssh2/dartssh2.dart';
 
 import 'persistent_shell.dart';
@@ -405,12 +403,19 @@ class SshClient {
   Future<void> _detectTmuxPath() async {
     if (_client == null || !isConnected) return;
 
-    // Step 1: ログインシェル経由で検出
+    // 全候補を1コマンドで検出（1 RTT のみ）
+    // login shell は起動が遅いため使わず、command -v + 既知パスを直接チェック
+    const candidates = [
+      '/opt/homebrew/bin/tmux',
+      '/usr/local/bin/tmux',
+      '/usr/bin/tmux',
+    ];
+    final fallbacks = candidates.map((p) => 'test -x $p && echo $p').join(' || ');
+    final cmd = 'command -v tmux 2>/dev/null || { $fallbacks; } 2>/dev/null || true';
+
     try {
       final path = await _withExecLock(() async {
-        final session = await _client!.execute(
-          r"$SHELL -lc 'command -v tmux'",
-        );
+        final session = await _client!.execute(cmd);
         final stdoutBytes = <int>[];
         await session.stdout.forEach((data) => stdoutBytes.addAll(data));
         await session.stderr.drain();
@@ -419,38 +424,11 @@ class SshClient {
       });
       if (path.isNotEmpty && path.startsWith('/')) {
         _tmuxPath = path;
-        debugPrint('_detectTmuxPath: found via login shell: $path');
+        debugPrint('_detectTmuxPath: found: $path');
         return;
       }
     } catch (e) {
-      debugPrint('_detectTmuxPath: login shell detection failed: $e');
-    }
-
-    // Step 2: 既知パスのフォールバック
-    const candidates = [
-      '/opt/homebrew/bin/tmux',
-      '/usr/local/bin/tmux',
-      '/usr/bin/tmux',
-    ];
-
-    for (final candidate in candidates) {
-      try {
-        final exitCode = await _withExecLock(() async {
-          final session = await _client!.execute('test -x $candidate');
-          await session.stdout.drain();
-          await session.stderr.drain();
-          final code = session.exitCode;
-          session.close();
-          return code;
-        });
-        if (exitCode == 0) {
-          _tmuxPath = candidate;
-          debugPrint('_detectTmuxPath: found via fallback: $candidate');
-          return;
-        }
-      } catch (e) {
-        debugPrint('_detectTmuxPath: error checking $candidate: $e');
-      }
+      debugPrint('_detectTmuxPath: detection failed: $e');
     }
     debugPrint('_detectTmuxPath: tmux not found');
   }

@@ -93,6 +93,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-
 
+      - name: Download libmoshios framework
+        run: |
+          mkdir -p ios/Frameworks
+          # Check cache first
+          if [ ! -f ios/Frameworks/libmoshios.framework/libmoshios ]; then
+            curl -L -o /tmp/libmoshios.tar \
+              https://github.com/blinksh/build-mosh/releases/download/1.3.2-6dd42d5/libmoshios-1.3.2-6dd42d5.framework.tar.gz
+            tar -xf /tmp/libmoshios.tar -C ios/Frameworks/
+            echo "libmoshios downloaded and extracted"
+          else
+            echo "libmoshios already present (cached)"
+          fi
+
+      - name: Cache libmoshios framework
+        uses: actions/cache@v4
+        with:
+          path: ios/Frameworks/libmoshios.framework
+          key: libmoshios-1.3.2-6dd42d5
+
       - name: Install iOS Pods
         run: |
           cd ios

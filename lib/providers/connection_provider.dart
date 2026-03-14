@@ -20,6 +20,9 @@ class Connection {
   /// ディープリンク用の識別子（外部スクリプトと共有可能）
   final String? deepLinkId;
 
+  /// Moshを使用するか（iOS only）
+  final bool useMosh;
+
   const Connection({
     required this.id,
     required this.name,
@@ -32,6 +35,7 @@ class Connection {
     required this.createdAt,
     this.lastConnectedAt,
     this.deepLinkId,
+    this.useMosh = false,
   });
 
   Connection copyWith({
@@ -47,6 +51,7 @@ class Connection {
     DateTime? lastConnectedAt,
     String? deepLinkId,
     bool clearDeepLinkId = false,
+    bool? useMosh,
   }) {
     return Connection(
       id: id ?? this.id,
@@ -60,6 +65,7 @@ class Connection {
       createdAt: createdAt ?? this.createdAt,
       lastConnectedAt: lastConnectedAt ?? this.lastConnectedAt,
       deepLinkId: clearDeepLinkId ? null : (deepLinkId ?? this.deepLinkId),
+      useMosh: useMosh ?? this.useMosh,
     );
   }
 
@@ -76,6 +82,7 @@ class Connection {
       'createdAt': createdAt.toIso8601String(),
       'lastConnectedAt': lastConnectedAt?.toIso8601String(),
       'deepLinkId': deepLinkId,
+      'useMosh': useMosh,
     };
   }
 
@@ -94,6 +101,7 @@ class Connection {
           ? DateTime.parse(json['lastConnectedAt'] as String)
           : null,
       deepLinkId: json['deepLinkId'] as String?,
+      useMosh: json['useMosh'] as bool? ?? false,
     );
   }
 }
